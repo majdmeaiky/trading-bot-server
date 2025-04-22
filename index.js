@@ -16,47 +16,51 @@ app.post('/webhook', async (req, res) => {
 
     try {
         // Set Leverage
-        await axios.post(`${BASE}/fapi/v1/leverage`, null, {
-            headers: { 'X-MBX-APIKEY': key },
-            params: { symbol, leverage: Math.floor(leverage) }
+        const leverageParams = `symbol=${symbol}&leverage=${leverage}&timestamp=${Date.now()}`;
+        const signature = signQuery(leverageParams, secret);
+        const fullURL = `${BASE}/fapi/v1/leverage?${leverageParams}&signature=${signature}`;
+        console.log('json: ',fullURL)
+        await axios.post(fullURL, null, {
+          headers: { 'X-MBX-APIKEY': key }
         });
+
 
         // Market Order
-        await axios.post(`${BASE}/fapi/v1/order`, null, {
-            headers: { 'X-MBX-APIKEY': key },
-            params: {
-                symbol,
-                side,
-                type: 'MARKET',
-                quantity: qty
-            }
-        });
+        // await axios.post(`${BASE}/fapi/v1/order`, null, {
+        //     headers: { 'X-MBX-APIKEY': key },
+        //     params: {
+        //         symbol,
+        //         side,
+        //         type: 'MARKET',
+        //         quantity: qty
+        //     }
+        // });
 
         // TP Order
-        await axios.post(`${BASE}/fapi/v1/order`, null, {
-            headers: { 'X-MBX-APIKEY': key },
-            params: {
-                symbol,
-                side: side === 'BUY' ? 'SELL' : 'BUY',
-                type: 'TAKE_PROFIT_MARKET',
-                stopPrice: tp,
-                closePosition: true,
-                timeInForce: 'GTC'
-            }
-        });
+        // await axios.post(`${BASE}/fapi/v1/order`, null, {
+        //     headers: { 'X-MBX-APIKEY': key },
+        //     params: {
+        //         symbol,
+        //         side: side === 'BUY' ? 'SELL' : 'BUY',
+        //         type: 'TAKE_PROFIT_MARKET',
+        //         stopPrice: tp,
+        //         closePosition: true,
+        //         timeInForce: 'GTC'
+        //     }
+        // });
 
         // SL Order
-        await axios.post(`${BASE}/fapi/v1/order`, null, {
-            headers: { 'X-MBX-APIKEY': key },
-            params: {
-                symbol,
-                side: side === 'BUY' ? 'SELL' : 'BUY',
-                type: 'STOP_MARKET',
-                stopPrice: sl,
-                closePosition: true,
-                timeInForce: 'GTC'
-            }
-        });
+        // await axios.post(`${BASE}/fapi/v1/order`, null, {
+        //     headers: { 'X-MBX-APIKEY': key },
+        //     params: {
+        //         symbol,
+        //         side: side === 'BUY' ? 'SELL' : 'BUY',
+        //         type: 'STOP_MARKET',
+        //         stopPrice: sl,
+        //         closePosition: true,
+        //         timeInForce: 'GTC'
+        //     }
+        // });
 
         res.status(200).send('✅ Order Executed');
     } catch (err) {
@@ -65,7 +69,7 @@ app.post('/webhook', async (req, res) => {
     }
 });
 
-//app.listen(3000, () => console.log('🚀 Server running on port 3000'));
+app.listen(3000, () => console.log('🚀 Server running on port 3000'));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
