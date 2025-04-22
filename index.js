@@ -2,11 +2,18 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const axios = require('axios');
 require('dotenv').config();
+const crypto = require('crypto');
+
 
 const app = express();
 app.use(bodyParser.json());
 
 const BASE = 'https://fapi.binance.com';
+
+function signQuery(queryString, secret) {
+    return crypto.createHmac('sha256', secret).update(queryString).digest('hex');
+}
+
 
 app.post('/webhook', async (req, res) => {
     const { symbol, side, qty, leverage, sl, tp } = req.body;
