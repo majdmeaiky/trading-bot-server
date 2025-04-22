@@ -33,7 +33,7 @@ app.post('/webhook', async (req, res) => {
 
 
         // Market Order
-        const orderParams = `symbol=${symbol}&side=${side}&type=MARKET&timestamp=${Date.now()}`;
+        const orderParams = `symbol=${symbol}&side=${side}&type=MARKET&quantity=${qty}&timestamp=${Date.now()}`;
         const signatureOrder = signQuery(orderParams, secret);
         const orderFullURL = `${BASE}/fapi/v1/order?${orderParams}&signature=${signatureOrder}`;
         console.log('json: ',orderFullURL)
