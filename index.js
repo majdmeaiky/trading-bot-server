@@ -28,7 +28,7 @@ app.post('/webhook', async (req, res) => {
         const signatureOpenOrder = signQuery(openOrderParams, secret);
         const openOrderFullURL = `${BASE}/fapi/v1/openOrders?${openOrderParams}&signature=${signatureOpenOrder}`;
         console.log('json: ', openOrderFullURL)
-        const response = await axios.get(openOrderFullURL, null, {
+        const response = await axios.get(openOrderFullURL, {
             headers: { 'X-MBX-APIKEY': key }
         });
 
