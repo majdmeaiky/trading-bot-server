@@ -22,24 +22,46 @@ app.post('/webhook', async (req, res) => {
     const secret = process.env.BINANCE_SECRET;
 
     try {
-        // Set Leverage
-        const leverageParams = `symbol=${symbol}&leverage=${leverage}&timestamp=${Date.now()}`;
-        const signatureLeverage = signQuery(leverageParams, secret);
-        const fullURL = `${BASE}/fapi/v1/leverage?${leverageParams}&signature=${signatureLeverage}`;
-        console.log('json: ',fullURL)
-        await axios.post(fullURL, null, {
-          headers: { 'X-MBX-APIKEY': key }
+
+        //check if there is an open order for this symbol
+        const openOrderParams = `symbol=${symbol}&timestamp=${Date.now()}`;
+        const signatureOpenOrder = signQuery(openOrderParams, secret);
+        const openOrderFullURL = `${BASE}/fapi/v1/openOrders?${openOrderParams}&signature=${signatureOpenOrder}`;
+        console.log('json: ', openOrderFullURL)
+        const response = await axios.get(openOrderFullURL, null, {
+            headers: { 'X-MBX-APIKEY': key }
         });
 
+        const openOrders = response.data;
+        console.log("open trades: ",openOrders);
+        if (openOrders.length > 0) {
+            return res.status(200).send("Trade skipped: already has open orders.");
+        }
+        else {
+          
+            console.log("✅ No open orders. Proceeding with trade...");
+            stop;
+            // Set Leverage
+            const leverageParams = `symbol=${symbol}&leverage=${leverage}&timestamp=${Date.now()}`;
+            const signatureLeverage = signQuery(leverageParams, secret);
+            const leverageFullURL = `${BASE}/fapi/v1/leverage?${leverageParams}&signature=${signatureLeverage}`;
+            console.log('json: ', leverageFullURL)
+            await axios.post(leverageFullURL, null, {
+                headers: { 'X-MBX-APIKEY': key }
+            });
 
-        // Market Order
-        const orderParams = `symbol=${symbol}&side=${side}&type=MARKET&quantity=${qty}&timestamp=${Date.now()}`;
-        const signatureOrder = signQuery(orderParams, secret);
-        const orderFullURL = `${BASE}/fapi/v1/order?${orderParams}&signature=${signatureOrder}`;
-        console.log('json: ',orderFullURL)
-        await axios.post(orderFullURL, null, {
-          headers: { 'X-MBX-APIKEY': key }
-        });
+
+            // Market Order
+            const orderParams = `symbol=${symbol}&side=${side}&type=MARKET&quantity=${qty}&timestamp=${Date.now()}`;
+            const signatureOrder = signQuery(orderParams, secret);
+            const orderFullURL = `${BASE}/fapi/v1/order?${orderParams}&signature=${signatureOrder}`;
+            console.log('json: ', orderFullURL)
+            await axios.post(orderFullURL, null, {
+                headers: { 'X-MBX-APIKEY': key }
+            });
+        }
+
+
 
         // await axios.post(`${BASE}/fapi/v1/order`, null, {
         //     headers: { 'X-MBX-APIKEY': key },
@@ -88,5 +110,5 @@ app.listen(3000, () => console.log('🚀 Server running on port 3000'));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`🚀 Server running on port ${PORT}`);
 });
