@@ -16,100 +16,83 @@ function signQuery(queryString, secret) {
 
 
 app.post('/webhook', async (req, res) => {
-    const { symbol, side, qty, leverage, sl, tp } = req.body;
+    const { symbol, side, qty, leverage, sl, tp, close } = req.body;
 
     const key = process.env.BINANCE_KEY;
     const secret = process.env.BINANCE_SECRET;
 
     try {
+        // ✅ Check if there is an active position
+        const activeOrderParams = `symbol=${symbol}&timestamp=${Date.now()}`;
+        const signatureAcivenOrder = signQuery(activeOrderParams, secret);
+        const activeOrderFullURL = `${BASE}/fapi/v2/positionRisk?${activeOrderParams}&signature=${signatureAcivenOrder}`;
+        const positionRes = await axios.get(activeOrderFullURL, {
+            headers: { 'X-MBX-APIKEY': key }
+        });
+        const position = positionRes.data[0];
 
-        //check if there is an open order for this symbol
-        const openOrderParams = `symbol=${symbol}&timestamp=${Date.now()}`;
-        const signatureOpenOrder = signQuery(openOrderParams, secret);
-        const openOrderFullURL = `${BASE}/fapi/v1/openOrders?${openOrderParams}&signature=${signatureOpenOrder}`;
-        console.log('json: ', openOrderFullURL)
-        const response = await axios.get(openOrderFullURL, {
+        if (close && position) {
+            const closeSide = Number(position.positionAmt) > 0 ? 'SELL' : 'BUY';
+
+            const closeParams = `symbol=${symbol}&side=${closeSide}&type=MARKET&closePosition=true&timestamp=${Date.now()}`;
+            const closeSignature = signQuery(closeParams, secret);
+            const closeURL = `${BASE}/fapi/v1/order?${closeParams}&signature=${closeSignature}`;
+
+            await axios.post(closeURL, null, {
+                headers: { 'X-MBX-APIKEY': key }
+            });
+
+            return res.status(200).send("✅ Position closed.");
+        }
+
+
+
+        if (position && Math.abs(Number(position.positionAmt)) > 0) {
+            return res.status(200).send("Trade skipped: already active position.");
+        }
+
+        console.log("✅ No open orders. Proceeding with trade...");
+
+        // Set Leverage
+        const leverageParams = `symbol=${symbol}&leverage=${leverage}&timestamp=${Date.now()}`;
+        const signatureLeverage = signQuery(leverageParams, secret);
+        const leverageFullURL = `${BASE}/fapi/v1/leverage?${leverageParams}&signature=${signatureLeverage}`;
+        console.log('json: ', leverageFullURL)
+        await axios.post(leverageFullURL, null, {
             headers: { 'X-MBX-APIKEY': key }
         });
 
-        const openOrders = response.data;
-        console.log("open trades: ",openOrders);
-        if (openOrders.length > 0) {
-            return res.status(200).send("Trade skipped: already has open orders.");
-        }
-        else {
-          
-            console.log("✅ No open orders. Proceeding with trade...");
-//            stop;
-            // Set Leverage
-            const leverageParams = `symbol=${symbol}&leverage=${leverage}&timestamp=${Date.now()}`;
-            const signatureLeverage = signQuery(leverageParams, secret);
-            const leverageFullURL = `${BASE}/fapi/v1/leverage?${leverageParams}&signature=${signatureLeverage}`;
-            console.log('json: ', leverageFullURL)
-            await axios.post(leverageFullURL, null, {
-                headers: { 'X-MBX-APIKEY': key }
-            });
 
+        // Market Order
+        const orderParams = `symbol=${symbol}&side=${side}&type=MARKET&quantity=${qty}&timestamp=${Date.now()}`;
+        const signatureOrder = signQuery(orderParams, secret);
+        const orderFullURL = `${BASE}/fapi/v1/order?${orderParams}&signature=${signatureOrder}`;
+        console.log('json: ', orderFullURL)
+        await axios.post(orderFullURL, null, {
+            headers: { 'X-MBX-APIKEY': key }
+        });
 
-            // Market Order
-            const orderParams = `symbol=${symbol}&side=${side}&type=MARKET&quantity=${qty}&timestamp=${Date.now()}`;
-            const signatureOrder = signQuery(orderParams, secret);
-            const orderFullURL = `${BASE}/fapi/v1/order?${orderParams}&signature=${signatureOrder}`;
-            console.log('json: ', orderFullURL)
-            await axios.post(orderFullURL, null, {
-                headers: { 'X-MBX-APIKEY': key }
-            });
+        // TP Order
+        const tpSide = side === 'BUY' ? 'SELL' : 'BUY';
+        const tpParams = `symbol=${symbol}&side=${tpSide}&type=TAKE_PROFIT_MARKET&stopPrice=${tp}&closePosition=true&timeInForce=GTC&timestamp=${Date.now()}`;
+        const tpSignature = signQuery(tpParams, secret);
+        const tpFullURL = `${BASE}/fapi/v1/order?${tpParams}&signature=${tpSignature}`;
 
-            // TP Order
-            const tpSide = side === 'BUY' ? 'SELL' : 'BUY';
-            const tpParams = `symbol=${symbol}&side=${tpSide}&type=TAKE_PROFIT_MARKET&stopPrice=${tp}&closePosition=true&timeInForce=GTC&timestamp=${Date.now()}`;
-            const tpSignature = signQuery(tpParams, secret);
-            const tpFullURL = `${BASE}/fapi/v1/order?${tpParams}&signature=${tpSignature}`;
-
-            await axios.post(tpFullURL, null, {
-                headers: { 'X-MBX-APIKEY': key }
-            });
-
-            // SL Order
-            const slSide = side === 'BUY' ? 'SELL' : 'BUY';
-            const slParams = `symbol=${symbol}&side=${slSide}&type=STOP_MARKET&stopPrice=${sl}&closePosition=true&timeInForce=GTC&timestamp=${Date.now()}`;
-            const slSignature = signQuery(slParams, secret);
-            const slFullURL = `${BASE}/fapi/v1/order?${slParams}&signature=${slSignature}`;
-
-            await axios.post(slFullURL, null, {
-                headers: { 'X-MBX-APIKEY': key }
-            });
-
-        }
-
-
-       
-        
-
-        // await axios.post(`${BASE}/fapi/v1/order`, null, {
-        //     headers: { 'X-MBX-APIKEY': key },
-        //     params: {
-        //         symbol,
-        //         side: side === 'BUY' ? 'SELL' : 'BUY',
-        //         type: 'TAKE_PROFIT_MARKET',
-        //         stopPrice: tp,
-        //         closePosition: true,
-        //         timeInForce: 'GTC'
-        //     }
-        // });
+        await axios.post(tpFullURL, null, {
+            headers: { 'X-MBX-APIKEY': key }
+        });
 
         // SL Order
-        // await axios.post(`${BASE}/fapi/v1/order`, null, {
-        //     headers: { 'X-MBX-APIKEY': key },
-        //     params: {
-        //         symbol,
-        //         side: side === 'BUY' ? 'SELL' : 'BUY',
-        //         type: 'STOP_MARKET',
-        //         stopPrice: sl,
-        //         closePosition: true,
-        //         timeInForce: 'GTC'
-        //     }
-        // });
+        const slSide = side === 'BUY' ? 'SELL' : 'BUY';
+        const slParams = `symbol=${symbol}&side=${slSide}&type=STOP_MARKET&stopPrice=${sl}&closePosition=true&timeInForce=GTC&timestamp=${Date.now()}`;
+        const slSignature = signQuery(slParams, secret);
+        const slFullURL = `${BASE}/fapi/v1/order?${slParams}&signature=${slSignature}`;
+
+        await axios.post(slFullURL, null, {
+            headers: { 'X-MBX-APIKEY': key }
+        });
+
+
 
         res.status(200).send('✅ Order Executed');
     } catch (err) {
