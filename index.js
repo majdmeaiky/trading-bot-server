@@ -40,7 +40,7 @@ app.post('/webhook', async (req, res) => {
         else {
           
             console.log("✅ No open orders. Proceeding with trade...");
-            stop;
+//            stop;
             // Set Leverage
             const leverageParams = `symbol=${symbol}&leverage=${leverage}&timestamp=${Date.now()}`;
             const signatureLeverage = signQuery(leverageParams, secret);
@@ -59,21 +59,33 @@ app.post('/webhook', async (req, res) => {
             await axios.post(orderFullURL, null, {
                 headers: { 'X-MBX-APIKEY': key }
             });
+
+            // TP Order
+            const tpSide = side === 'BUY' ? 'SELL' : 'BUY';
+            const tpParams = `symbol=${symbol}&side=${tpSide}&type=TAKE_PROFIT_MARKET&stopPrice=${tp}&closePosition=true&timeInForce=GTC&timestamp=${Date.now()}`;
+            const tpSignature = signQuery(tpParams, secret);
+            const tpFullURL = `${BASE}/fapi/v1/order?${tpParams}&signature=${tpSignature}`;
+
+            await axios.post(tpFullURL, null, {
+                headers: { 'X-MBX-APIKEY': key }
+            });
+
+            // SL Order
+            const slSide = side === 'BUY' ? 'SELL' : 'BUY';
+            const slParams = `symbol=${symbol}&side=${slSide}&type=STOP_MARKET&stopPrice=${sl}&closePosition=true&timeInForce=GTC&timestamp=${Date.now()}`;
+            const slSignature = signQuery(slParams, secret);
+            const slFullURL = `${BASE}/fapi/v1/order?${slParams}&signature=${slSignature}`;
+
+            await axios.post(slFullURL, null, {
+                headers: { 'X-MBX-APIKEY': key }
+            });
+
         }
 
 
+       
+        
 
-        // await axios.post(`${BASE}/fapi/v1/order`, null, {
-        //     headers: { 'X-MBX-APIKEY': key },
-        //     params: {
-        //         symbol,
-        //         side,
-        //         type: 'MARKET',
-        //         quantity: qty
-        //     }
-        // });
-
-        // TP Order
         // await axios.post(`${BASE}/fapi/v1/order`, null, {
         //     headers: { 'X-MBX-APIKEY': key },
         //     params: {
