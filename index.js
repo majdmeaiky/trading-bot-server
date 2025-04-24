@@ -3,10 +3,13 @@ const bodyParser = require('body-parser');
 const axios = require('axios');
 require('dotenv').config();
 const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
+//const fs = require('fs');
+//const path = require('path');
+const { createClient } = require('@supabase/supabase-js');
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
-const TIMESTAMP_FILE = path.join(__dirname, 'entryTimestamps.json');
+
+//const TIMESTAMP_FILE = path.join(__dirname, 'entryTimestamps.json');
 const app = express();
 app.use(bodyParser.json());
 
@@ -17,28 +20,38 @@ function signQuery(queryString, secret) {
 }
 
 // Read timestamps from file
-function loadTimestamps() {
-    try {
-        const data = fs.readFileSync(TIMESTAMP_FILE, 'utf8');
-        return JSON.parse(data);
-    } catch (err) {
-        console.error("❌ Failed to load timestamps:", err);
-        return {};
+async function loadTimestampFromSupabase(symbol) {
+    const { data, error } = await supabase
+        .from('entry_timestamps')
+        .select('timestamp')
+        .eq('symbol', symbol)
+        .single();
+
+    if (error) {
+        console.error("❌ Failed to load timestamp:", error);
+        return null;
+    }
+    return data.timestamp;
+}
+
+
+// Write timestamps to file
+async function saveTimestampToSupabase(symbol) {
+    const { data, error } = await supabase
+        .from('entry_timestamps')
+        .upsert([{ symbol, timestamp: Date.now() }], { onConflict: ['symbol'] });
+
+    if (error) {
+        console.error("❌ Failed to save timestamp:", error);
+    } else {
+        console.log("✅ Timestamp saved to Supabase:", data);
     }
 }
 
-// Write timestamps to file
-function saveTimestamps(data) {
-    try {
-        fs.writeFileSync(TIMESTAMP_FILE, JSON.stringify(data, null, 2), 'utf8');
-    } catch (err) {
-        console.error("❌ Failed to save timestamps:", err);
-    }
-}
 
 
 app.post('/webhook', async (req, res) => {
-    let entryTimestamps = loadTimestamps();
+    //let entryTimestamps = loadTimestamps();
     console.log('json',entryTimestamps );
 
     const { symbol, side, qty, leverage, sl, tp, close } = req.body;
@@ -87,13 +100,14 @@ app.post('/webhook', async (req, res) => {
         const leverageParams = `symbol=${symbol}&leverage=${leverage}&timestamp=${Date.now()}`;
         const signatureLeverage = signQuery(leverageParams, secret);
         const leverageFullURL = `${BASE}/fapi/v1/leverage?${leverageParams}&signature=${signatureLeverage}`;
-        console.log('json: ', leverageFullURL);
         await axios.post(leverageFullURL, null, {
             headers: { 'X-MBX-APIKEY': key }
         });
-        entryTimestamps[symbol] = Date.now();
-        saveTimestamps(entryTimestamps);
-        console.log('success',entryTimestamps );
+        const lastEntryTime = await loadTimestampFromSupabase(symbol);
+
+        //entryTimestamps[symbol] = Date.now();
+        //saveTimestamps(entryTimestamps);
+        console.log('success',lastEntryTime );
 
 
     } catch (err) {
