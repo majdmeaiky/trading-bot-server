@@ -22,8 +22,8 @@ function signQuery(queryString, secret) {
 // Read timestamps from file
 async function loadTimestampFromSupabase(symbol) {
     const { data, error } = await supabase
-        .from('entry_timestamps')
-        .select('timestamp')
+        .from('orders')
+        .select('timeStamp')
         .eq('symbol', symbol)
         .single();
 
@@ -38,8 +38,8 @@ async function loadTimestampFromSupabase(symbol) {
 // Write timestamps to file
 async function saveTimestampToSupabase(symbol) {
     const { data, error } = await supabase
-        .from('entry_timestamps')
-        .upsert([{ symbol, timestamp: Date.now() }], { onConflict: ['symbol'] });
+        .from('orders')
+        .upsert([{ symbol, timeStamp: Date.now() }], { onConflict: ['symbol'] });
 
     if (error) {
         console.error("❌ Failed to save timestamp:", error);
