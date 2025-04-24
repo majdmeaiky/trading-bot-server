@@ -104,6 +104,7 @@ app.post('/webhook', async (req, res) => {
             headers: { 'X-MBX-APIKEY': key }
         });
         const lastEntryTime = await loadTimestampFromSupabase(symbol);
+        await saveTimestampToSupabase(symbol);
 
         //entryTimestamps[symbol] = Date.now();
         //saveTimestamps(entryTimestamps);
