@@ -56,10 +56,10 @@ app.post('/webhook', async (req, res) => {
             headers: { 'X-MBX-APIKEY': key }
         });
         const position = positionRes.data[0];
-        console.log("active positions");
+        console.log("active positions:" , position);
         
 
-        if (close && position) {
+        if (close && position != null) {
             const closeSide = Number(position.positionAmt) > 0 ? 'SELL' : 'BUY';
 
             const closeParams = `symbol=${symbol}&side=${closeSide}&type=MARKET&closePosition=true&timestamp=${Date.now()}`;
