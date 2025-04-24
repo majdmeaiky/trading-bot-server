@@ -30,7 +30,7 @@ function loadTimestamps() {
 // Write timestamps to file
 function saveTimestamps(data) {
     try {
-        fs.writeFileSync(TIMESTAMP_FILE, JSON.stringify(data, null, 2));
+        fs.writeFileSync(TIMESTAMP_FILE, JSON.stringify(data));
     } catch (err) {
         console.error("❌ Failed to save timestamps:", err);
     }
