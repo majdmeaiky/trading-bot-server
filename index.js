@@ -31,7 +31,7 @@ async function loadTimestampFromSupabase(symbol) {
         console.error("❌ Failed to load timestamp:", error);
         return null;
     }
-    return data.timestamp;
+    return data.timeStamp;
 }
 
 
