@@ -27,6 +27,7 @@ async function loadTimestampFromSupabase(symbol) {
         .eq('symbol', symbol)
         .single();
 
+        console.log(data);
     if (error) {
         console.error("❌ Failed to load timestamp:", error);
         return null;
