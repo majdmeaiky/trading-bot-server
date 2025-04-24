@@ -55,9 +55,9 @@ app.post('/webhook', async (req, res) => {
         const positionRes = await axios.get(activeOrderFullURL, {
             headers: { 'X-MBX-APIKEY': key }
         });
-        const position = positionRes.data[0];
+        const position = positionRes.data;
         console.log("active positions:" , position);
-        
+        stop();
 
         if (close && position != null) {
             const closeSide = Number(position.positionAmt) > 0 ? 'SELL' : 'BUY';
