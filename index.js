@@ -19,7 +19,7 @@ function signQuery(queryString, secret) {
 // Read timestamps from file
 function loadTimestamps() {
     try {
-        const data = fs.readFileSync('/entryTimestamps.json', 'utf8');
+        const data = fs.readFileSync('TIMESTAMP_FILE', 'utf8');
         return JSON.parse(data);
     } catch (err) {
         console.error("❌ Failed to load timestamps:", err);
@@ -30,7 +30,7 @@ function loadTimestamps() {
 // Write timestamps to file
 function saveTimestamps(data) {
     try {
-        fs.writeFileSync('/entryTimestamps.json', JSON.stringify(data));
+        fs.writeFileSync(TIMESTAMP_FILE, JSON.stringify(data));
     } catch (err) {
         console.error("❌ Failed to save timestamps:", err);
     }
