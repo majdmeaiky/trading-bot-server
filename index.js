@@ -3,13 +3,8 @@ const bodyParser = require('body-parser');
 const axios = require('axios');
 require('dotenv').config();
 const crypto = require('crypto');
-//const fs = require('fs');
-//const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
-
-
-//const TIMESTAMP_FILE = path.join(__dirname, 'entryTimestamps.json');
 const app = express();
 app.use(bodyParser.json());
 
@@ -51,9 +46,6 @@ async function saveTimestampToSupabase(symbol) {
 
 
 app.post('/webhook', async (req, res) => {
-    //let entryTimestamps = loadTimestamps();
-    //console.log('json',entryTimestamps );
-
     const { symbol, side, qty, leverage, sl, tp, close } = req.body;
 
     const key = process.env.BINANCE_KEY;
@@ -74,7 +66,7 @@ app.post('/webhook', async (req, res) => {
         console.log("active positions:" , position);
   
 
-        if (close && position != null) {
+        if (close && position) {
             const closeSide = Number(position.positionAmt) > 0 ? 'SELL' : 'BUY';
 
             const closeParams = `symbol=${symbol}&side=${closeSide}&type=MARKET&closePosition=true&timestamp=${Date.now()}`;
@@ -105,9 +97,6 @@ app.post('/webhook', async (req, res) => {
         });
         const lastEntryTime = await loadTimestampFromSupabase(symbol);
         await saveTimestampToSupabase(symbol);
-
-        //entryTimestamps[symbol] = Date.now();
-        //saveTimestamps(entryTimestamps);
         console.log('success',lastEntryTime );
 
 
