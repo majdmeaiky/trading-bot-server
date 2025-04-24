@@ -39,7 +39,7 @@ function saveTimestamps(data) {
 
 app.post('/webhook', async (req, res) => {
     let entryTimestamps = loadTimestamps();
-    console.log('json',entryTimestamps );
+    //console.log('json',entryTimestamps );
 
     const { symbol, side, qty, leverage, sl, tp, close } = req.body;
 
@@ -47,7 +47,6 @@ app.post('/webhook', async (req, res) => {
     const secret = process.env.BINANCE_SECRET;
 
     try {
-        let activePositions = {}; // e.g., { SOLUSDT: { time: 1680000000000, ... } }
 
         // ✅ Check if there is an active position
         const activeOrderParams = `symbol=${symbol}&timestamp=${Date.now()}`;
@@ -58,9 +57,6 @@ app.post('/webhook', async (req, res) => {
         });
         const position = positionRes.data[0];
 
-        if (!position || Math.abs(Number(position.positionAmt)) === 0) {
-            activePositions[symbol] = { time: Date.now() };
-        }
         
 
         if (close && position) {
@@ -93,8 +89,9 @@ app.post('/webhook', async (req, res) => {
         await axios.post(leverageFullURL, null, {
             headers: { 'X-MBX-APIKEY': key }
         });
-
-
+        entryTimestamps[symbol] = Date.now();
+        saveTimestamps(entryTimestamps);
+        console.log('success',entryTimestamps );
         // Market Order
         const orderParams = `symbol=${symbol}&side=${side}&type=MARKET&quantity=${qty}&timestamp=${Date.now()}`;
         const signatureOrder = signQuery(orderParams, secret);
@@ -103,6 +100,7 @@ app.post('/webhook', async (req, res) => {
         await axios.post(orderFullURL, null, {
             headers: { 'X-MBX-APIKEY': key }
         });
+       
 
         // TP Order
         const tpSide = side === 'BUY' ? 'SELL' : 'BUY';
