@@ -96,43 +96,14 @@ app.post('/webhook', async (req, res) => {
         console.log('success',entryTimestamps );
 
 
-        // Market Order
-        const orderParams = `symbol=${symbol}&side=${side}&type=MARKET&quantity=${qty}&timestamp=${Date.now()}`;
-        const signatureOrder = signQuery(orderParams, secret);
-        const orderFullURL = `${BASE}/fapi/v1/order?${orderParams}&signature=${signatureOrder}`;
-        console.log('json: ', orderFullURL)
-        await axios.post(orderFullURL, null, {
-            headers: { 'X-MBX-APIKEY': key }
-        });
-       
-
-        // TP Order
-        const tpSide = side === 'BUY' ? 'SELL' : 'BUY';
-        const tpParams = `symbol=${symbol}&side=${tpSide}&type=TAKE_PROFIT_MARKET&stopPrice=${tp}&closePosition=true&timeInForce=GTC&timestamp=${Date.now()}`;
-        const tpSignature = signQuery(tpParams, secret);
-        const tpFullURL = `${BASE}/fapi/v1/order?${tpParams}&signature=${tpSignature}`;
-
-        await axios.post(tpFullURL, null, {
-            headers: { 'X-MBX-APIKEY': key }
-        });
-
-        // SL Order
-        const slSide = side === 'BUY' ? 'SELL' : 'BUY';
-        const slParams = `symbol=${symbol}&side=${slSide}&type=STOP_MARKET&stopPrice=${sl}&closePosition=true&timeInForce=GTC&timestamp=${Date.now()}`;
-        const slSignature = signQuery(slParams, secret);
-        const slFullURL = `${BASE}/fapi/v1/order?${slParams}&signature=${slSignature}`;
-
-        await axios.post(slFullURL, null, {
-            headers: { 'X-MBX-APIKEY': key }
-        });
-
-
-
-        res.status(200).send('✅ Order Executed');
     } catch (err) {
         console.error(err.response?.data || err.message);
         res.status(500).send('❌ Order Failed');
     }
+});
+
+app.get('/', (req, res) => {
+    res.status(200).send("✅ Server is alive.");
 });
 
 app.listen(3000, () => console.log('🚀 Server running on port 3000'));
