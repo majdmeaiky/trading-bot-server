@@ -85,13 +85,15 @@ app.post('/webhook', async (req, res) => {
         const leverageParams = `symbol=${symbol}&leverage=${leverage}&timestamp=${Date.now()}`;
         const signatureLeverage = signQuery(leverageParams, secret);
         const leverageFullURL = `${BASE}/fapi/v1/leverage?${leverageParams}&signature=${signatureLeverage}`;
-        console.log('json: ', leverageFullURL)
+        console.log('json: ', leverageFullURL);
         await axios.post(leverageFullURL, null, {
             headers: { 'X-MBX-APIKEY': key }
         });
         entryTimestamps[symbol] = Date.now();
         saveTimestamps(entryTimestamps);
         console.log('success',entryTimestamps );
+
+
         // Market Order
         const orderParams = `symbol=${symbol}&side=${side}&type=MARKET&quantity=${qty}&timestamp=${Date.now()}`;
         const signatureOrder = signQuery(orderParams, secret);
