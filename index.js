@@ -3,8 +3,10 @@ const bodyParser = require('body-parser');
 const axios = require('axios');
 require('dotenv').config();
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
-
+const TIMESTAMP_FILE = path.join(__dirname, 'entryTimestamps.json');
 const app = express();
 app.use(bodyParser.json());
 
@@ -14,14 +16,39 @@ function signQuery(queryString, secret) {
     return crypto.createHmac('sha256', secret).update(queryString).digest('hex');
 }
 
+// Read timestamps from file
+function loadTimestamps() {
+    try {
+        const data = fs.readFileSync(TIMESTAMP_FILE, 'utf8');
+        return JSON.parse(data);
+    } catch (err) {
+        console.error("❌ Failed to load timestamps:", err);
+        return {};
+    }
+}
+
+// Write timestamps to file
+function saveTimestamps(data) {
+    try {
+        fs.writeFileSync(TIMESTAMP_FILE, JSON.stringify(data, null, 2));
+    } catch (err) {
+        console.error("❌ Failed to save timestamps:", err);
+    }
+}
+
 
 app.post('/webhook', async (req, res) => {
+    let entryTimestamps = loadTimestamps();
+    console.log('json',entryTimestamps );
+
     const { symbol, side, qty, leverage, sl, tp, close } = req.body;
 
     const key = process.env.BINANCE_KEY;
     const secret = process.env.BINANCE_SECRET;
 
     try {
+        let activePositions = {}; // e.g., { SOLUSDT: { time: 1680000000000, ... } }
+
         // ✅ Check if there is an active position
         const activeOrderParams = `symbol=${symbol}&timestamp=${Date.now()}`;
         const signatureAcivenOrder = signQuery(activeOrderParams, secret);
@@ -30,6 +57,11 @@ app.post('/webhook', async (req, res) => {
             headers: { 'X-MBX-APIKEY': key }
         });
         const position = positionRes.data[0];
+
+        if (!position || Math.abs(Number(position.positionAmt)) === 0) {
+            activePositions[symbol] = { time: Date.now() };
+        }
+        
 
         if (close && position) {
             const closeSide = Number(position.positionAmt) > 0 ? 'SELL' : 'BUY';
