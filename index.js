@@ -47,7 +47,7 @@ app.post('/webhook', async (req, res) => {
     const secret = process.env.BINANCE_SECRET;
 
     try {
-
+        console.log("start");
         // ✅ Check if there is an active position
         const activeOrderParams = `symbol=${symbol}&timestamp=${Date.now()}`;
         const signatureAcivenOrder = signQuery(activeOrderParams, secret);
@@ -56,7 +56,7 @@ app.post('/webhook', async (req, res) => {
             headers: { 'X-MBX-APIKEY': key }
         });
         const position = positionRes.data[0];
-
+        console.log("active positions");
         
 
         if (close && position) {
