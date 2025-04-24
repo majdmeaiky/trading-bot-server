@@ -39,7 +39,7 @@ function saveTimestamps(data) {
 
 app.post('/webhook', async (req, res) => {
     let entryTimestamps = loadTimestamps();
-    //console.log('json',entryTimestamps );
+    console.log('json',entryTimestamps );
 
     const { symbol, side, qty, leverage, sl, tp, close } = req.body;
 
