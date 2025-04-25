@@ -6,6 +6,11 @@ const crypto = require('crypto');
 const { createClient } = require('@supabase/supabase-js');
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 const app = express();
+
+const BAR_DURATION_MS = 5 * 60 * 1000; // 5 minutes
+const MAX_BARS = 40;
+const MAX_DURATION_MS = BAR_DURATION_MS * MAX_BARS; // 12,000,000 ms
+
 app.use(bodyParser.json());
 
 const BASE = 'https://fapi.binance.com';
@@ -43,6 +48,10 @@ async function saveTimestampToSupabase(symbol) {
     }
 }
 
+function isTradeTooOld(entryTimestamp) {
+    const now = Date.now();
+    return (now - entryTimestamp >= MAX_DURATION_MS);
+}
 
 
 app.post('/webhook', async (req, res) => {
@@ -63,10 +72,13 @@ app.post('/webhook', async (req, res) => {
         const allPositions = positionRes.data;
         const position = allPositions.find(p => Math.abs(Number(p.positionAmt)) > 0);
 
-        console.log("active positions:" , position);
-  
+        console.log("active positions:", position);
 
-        if (close && position) {
+        const symbolEntryTimestamp = loadTimestampFromSupabase(symbol);
+
+
+
+        if (close && position && isTradeTooOld(symbolEntryTimestamp)) {
             const closeSide = Number(position.positionAmt) > 0 ? 'SELL' : 'BUY';
 
             const closeParams = `symbol=${symbol}&side=${closeSide}&type=MARKET&closePosition=true&timestamp=${Date.now()}`;
@@ -88,6 +100,8 @@ app.post('/webhook', async (req, res) => {
 
         console.log("✅ No open orders. Proceeding with trade...");
 
+        await saveTimestampToSupabase(symbol);
+
         // Set Leverage
         const leverageParams = `symbol=${symbol}&leverage=${leverage}&timestamp=${Date.now()}`;
         const signatureLeverage = signQuery(leverageParams, secret);
@@ -95,9 +109,40 @@ app.post('/webhook', async (req, res) => {
         await axios.post(leverageFullURL, null, {
             headers: { 'X-MBX-APIKEY': key }
         });
-        const lastEntryTime = await loadTimestampFromSupabase(symbol);
-        await saveTimestampToSupabase(symbol);
-        console.log('success',lastEntryTime );
+
+        // Market Order
+        const orderParams = `symbol=${symbol}&side=${side}&type=MARKET&quantity=${qty}&timestamp=${Date.now()}`;
+        const signatureOrder = signQuery(orderParams, secret);
+        const orderFullURL = `${BASE}/fapi/v1/order?${orderParams}&signature=${signatureOrder}`;
+        console.log('json: ', orderFullURL)
+        await axios.post(orderFullURL, null, {
+            headers: { 'X-MBX-APIKEY': key }
+        });
+
+        // TP Order
+        const tpSide = side === 'BUY' ? 'SELL' : 'BUY';
+        const tpParams = `symbol=${symbol}&side=${tpSide}&type=TAKE_PROFIT_MARKET&stopPrice=${tp}&closePosition=true&timeInForce=GTC&timestamp=${Date.now()}`;
+        const tpSignature = signQuery(tpParams, secret);
+        const tpFullURL = `${BASE}/fapi/v1/order?${tpParams}&signature=${tpSignature}`;
+
+        await axios.post(tpFullURL, null, {
+            headers: { 'X-MBX-APIKEY': key }
+        });
+
+        // SL Order
+        const slSide = side === 'BUY' ? 'SELL' : 'BUY';
+        const slParams = `symbol=${symbol}&side=${slSide}&type=STOP_MARKET&stopPrice=${sl}&closePosition=true&timeInForce=GTC&timestamp=${Date.now()}`;
+        const slSignature = signQuery(slParams, secret);
+        const slFullURL = `${BASE}/fapi/v1/order?${slParams}&signature=${slSignature}`;
+
+        await axios.post(slFullURL, null, {
+            headers: { 'X-MBX-APIKEY': key }
+        });
+
+
+
+        res.status(200).send('✅ Order Executed');
+
 
 
     } catch (err) {
@@ -112,7 +157,7 @@ app.get('/', (req, res) => {
 
 app.listen(3000, () => console.log('🚀 Server running on port 3000'));
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`🚀 Server running on port ${PORT}`);
-});
+// const PORT = process.env.PORT || 3000;
+// app.listen(PORT, () => {
+//     console.log(`🚀 Server running on port ${PORT}`);
+// });
