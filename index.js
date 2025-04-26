@@ -70,7 +70,6 @@ app.post('/webhook', async (req, res) => {
 
 
     console.log('body:' , body)
-    return res.status(200);
     const { symbol, side, qty, leverage, sl, tp, close } = req.body;
 
     const key = process.env.BINANCE_KEY;
@@ -125,6 +124,7 @@ app.post('/webhook', async (req, res) => {
         await axios.post(leverageFullURL, null, {
             headers: { 'X-MBX-APIKEY': key }
         });
+        return res.status(200);
 
         // Market Order
         const orderParams = `symbol=${symbol}&side=${side}&type=MARKET&quantity=${qty}&timestamp=${Date.now()}`;
