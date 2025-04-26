@@ -55,6 +55,8 @@ function isTradeTooOld(entryTimestamp) {
 
 
 app.post('/webhook', async (req, res) => {
+    console.log('body:' , req.body)
+    return res.status(200);
     const { symbol, side, qty, leverage, sl, tp, close } = req.body;
 
     const key = process.env.BINANCE_KEY;
