@@ -12,6 +12,7 @@ const MAX_BARS = 40;
 const MAX_DURATION_MS = BAR_DURATION_MS * MAX_BARS; // 12,000,000 ms
 
 app.use(bodyParser.json());
+app.use(bodyParser.text({ type: "*/*" }));
 
 const BASE = 'https://fapi.binance.com';
 
@@ -55,7 +56,20 @@ function isTradeTooOld(entryTimestamp) {
 
 
 app.post('/webhook', async (req, res) => {
-    console.log('body:' , req.body)
+    let body = req.body;
+    try {
+        if (typeof body === 'string') {
+            body = JSON.parse(body); // Now body is your JSON object
+        }
+    } catch (e) {
+        console.error("❌ Failed parsing JSON", e.message);
+        return res.status(400).send("Bad JSON");
+    }
+
+    console.log('✅ Webhook Body Received:', body);
+
+
+    console.log('body:' , body)
     return res.status(200);
     const { symbol, side, qty, leverage, sl, tp, close } = req.body;
 
