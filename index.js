@@ -82,8 +82,7 @@ async function updateHalfClosed(symbol) {
 
 // === Webhook Endpoint ===
 app.post('/webhook', async (req, res) => {
-    console.log(Date.now());
-    return;
+
     let body = req.body;
     try {
         if (typeof body === 'string') body = JSON.parse(body);
@@ -114,7 +113,7 @@ app.post('/webhook', async (req, res) => {
             console.log('position', position);
             console.log('currentTrade', currentTrade);
 
-            if (close && position && currentTrade ) { //&& isTradeTooOld(currentTrade.timeStamp)
+            if (close && position && currentTrade && isTradeTooOld(currentTrade.timeStamp)) {
                 // Close expired trade
                 const closeSide = Number(position.positionAmt) > 0 ? 'SELL' : 'BUY';
                 const closeParams = `symbol=${symbol}&side=${closeSide}&type=MARKET&quantity=${Math.abs(Number(position.positionAmt))}&timestamp=${Date.now()}`;
@@ -126,15 +125,17 @@ app.post('/webhook', async (req, res) => {
                 return;
             }
 
+            if (close && !position) {
+                console.log(`⚠️ No Open Trade for ${symbol}!.`);
+                return;
+            }
+
             if (position) {
                 console.log(`⚠️ Active position detected for ${symbol}. SKIPPING THIS TRADE!.`);
                 return;
             }
 
-            if (close && !position) {
-                console.log(`⚠️ No Open Trade for ${symbol}!.`);
-                return;
-            }
+         
 
             // No active position -> Place new
             await saveTrade(symbol, side, qty, leverage, sl, tp, entryPrice);
