@@ -115,18 +115,16 @@ app.post('/webhook', async (req, res) => {
             if (close && position && currentTrade ) { //&& isTradeTooOld(currentTrade.timeStamp)
                 // Close expired trade
                 const closeSide = Number(position.positionAmt) > 0 ? 'SELL' : 'BUY';
-                const closeParams = `symbol=${symbol}&side=${closeSide}&type=MARKET&closePosition=true&timestamp=${Date.now()}`;
+                const closeParams = `symbol=${symbol}&side=${closeSide}&type=MARKET&quantity=${Math.abs(Number(position.positionAmt))}&timestamp=${Date.now()}`;
                 const closeSignature = signQuery(closeParams, secret);
                 const closeURL = `${BASE}/fapi/v1/order?${closeParams}&signature=${closeSignature}`;
                 await axios.post(closeURL, null, { headers: { 'X-MBX-APIKEY': key } });
                 await deleteTrade(symbol);
                 console.log(`✅ Closed expired trade: ${symbol}`);
-                return res.status(200).send("✅ Trade closed (timeout).");
             }
 
             if (position) {
-                console.log(`⚠️ Active position detected for ${symbol}. Skipping opening new.`);
-                return res.status(200).send('Trade already active.');
+                console.log(`⚠️ Active position detected for ${symbol}. SKIPPING THIS TRADE!.`);
             }
 
             // No active position -> Place new
@@ -159,10 +157,8 @@ app.post('/webhook', async (req, res) => {
             await axios.post(slFullURL, null, { headers: { 'X-MBX-APIKEY': key } });
 
             console.log(`✅ New trade opened for ${symbol}`);
-            res.status(200).send('✅ New trade opened.');
         } catch (err) {
             console.error(err.response?.data || err.message);
-            res.status(500).send('❌ Webhook error');
         }
     })();
 });
