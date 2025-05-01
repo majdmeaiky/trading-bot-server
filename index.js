@@ -93,7 +93,7 @@ app.post('/webhook', async (req, res) => {
     res.status(200).send("✅ Received"); // Send early response
     (async () => {
 
-        const { symbol, side, qty, leverage, sl, tp, close } = body;
+        const { symbol, side, qty, leverage, sl, tp, close, entryPrice } = body;
         console.log('✅ Webhook received for:', symbol);
 
         try {
@@ -127,7 +127,7 @@ app.post('/webhook', async (req, res) => {
             }
 
             // No active position -> Place new
-            await saveTrade(symbol, side, qty, leverage, sl, tp, close);
+            await saveTrade(symbol, side, qty, leverage, sl, tp, entryPrice);
 
             // Set leverage
             const leverageParams = `symbol=${symbol}&leverage=${leverage}&timestamp=${Date.now()}`;
