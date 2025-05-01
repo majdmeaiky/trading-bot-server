@@ -108,6 +108,9 @@ app.post('/webhook', async (req, res) => {
             const position = allPositions.find(p => p.symbol === symbol && Math.abs(Number(p.positionAmt)) > 0);
 
             const currentTrade = await getTrade(symbol);
+            console.log('close', close);
+            console.log('position', position);
+            console.log('currentTrade', currentTrade);
 
             if (close && position && currentTrade ) { //&& isTradeTooOld(currentTrade.timeStamp)
                 // Close expired trade
