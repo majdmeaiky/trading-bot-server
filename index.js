@@ -129,6 +129,11 @@ app.post('/webhook', async (req, res) => {
                 return;
             }
 
+            if (close && !position) {
+                console.log(`⚠️ No Open Trade for ${symbol}!.`);
+                return;
+            }
+
             // No active position -> Place new
             await saveTrade(symbol, side, qty, leverage, sl, tp, entryPrice);
 
