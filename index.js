@@ -33,16 +33,16 @@ function isTradeTooOld(entryTimestamp) {
 async function saveTrade(symbol, side, qty, leverage, sl, tp, entryPrice) {
     const { error } = await supabase
         .from('orders')
-        .upsert([{ 
-            symbol, 
-            side, 
-            qty, 
-            leverage, 
-            sl, 
-            tp, 
-            entryPrice, 
-            half_closed: false, 
-            timeStamp: Date.now() 
+        .upsert([{
+            symbol,
+            side,
+            qty,
+            leverage,
+            sl,
+            tp,
+            entryPrice,
+            half_closed: false,
+            timeStamp: Date.now()
         }], { onConflict: ['symbol'] });
 
     if (error) console.error("❌ Failed to save trade:", error);
@@ -90,74 +90,78 @@ app.post('/webhook', async (req, res) => {
         return res.status(400).send("Bad JSON");
     }
 
-    const { symbol, side, qty, leverage, sl, tp, close } = body;
-    console.log('✅ Webhook received for:', symbol);
+    res.status(200).send("✅ Received"); // Send early response
+    (async () => {
 
-    try {
-        const activeOrderParams = `symbol=${symbol}&timestamp=${Date.now()}`;
-        const signatureActiveOrder = signQuery(activeOrderParams, secret);
-        const activeOrderFullURL = `${BASE}/fapi/v2/positionRisk?${activeOrderParams}&signature=${signatureActiveOrder}`;
-        const positionRes = await axios.get(activeOrderFullURL, {
-            headers: { 'X-MBX-APIKEY': key }
-        });
+        const { symbol, side, qty, leverage, sl, tp, close } = body;
+        console.log('✅ Webhook received for:', symbol);
 
-        const allPositions = positionRes.data;
-        const position = allPositions.find(p => p.symbol === symbol && Math.abs(Number(p.positionAmt)) > 0);
+        try {
+            const activeOrderParams = `symbol=${symbol}&timestamp=${Date.now()}`;
+            const signatureActiveOrder = signQuery(activeOrderParams, secret);
+            const activeOrderFullURL = `${BASE}/fapi/v2/positionRisk?${activeOrderParams}&signature=${signatureActiveOrder}`;
+            const positionRes = await axios.get(activeOrderFullURL, {
+                headers: { 'X-MBX-APIKEY': key }
+            });
 
-        const currentTrade = await getTrade(symbol);
+            const allPositions = positionRes.data;
+            const position = allPositions.find(p => p.symbol === symbol && Math.abs(Number(p.positionAmt)) > 0);
 
-        if (close && position && currentTrade && isTradeTooOld(currentTrade.timeStamp)) {
-            // Close expired trade
-            const closeSide = Number(position.positionAmt) > 0 ? 'SELL' : 'BUY';
-            const closeParams = `symbol=${symbol}&side=${closeSide}&type=MARKET&closePosition=true&timestamp=${Date.now()}`;
-            const closeSignature = signQuery(closeParams, secret);
-            const closeURL = `${BASE}/fapi/v1/order?${closeParams}&signature=${closeSignature}`;
-            await axios.post(closeURL, null, { headers: { 'X-MBX-APIKEY': key } });
-            await deleteTrade(symbol);
-            console.log(`✅ Closed expired trade: ${symbol}`);
-            return res.status(200).send("✅ Trade closed (timeout).");
+            const currentTrade = await getTrade(symbol);
+
+            if (close && position && currentTrade && isTradeTooOld(currentTrade.timeStamp)) {
+                // Close expired trade
+                const closeSide = Number(position.positionAmt) > 0 ? 'SELL' : 'BUY';
+                const closeParams = `symbol=${symbol}&side=${closeSide}&type=MARKET&closePosition=true&timestamp=${Date.now()}`;
+                const closeSignature = signQuery(closeParams, secret);
+                const closeURL = `${BASE}/fapi/v1/order?${closeParams}&signature=${closeSignature}`;
+                await axios.post(closeURL, null, { headers: { 'X-MBX-APIKEY': key } });
+                await deleteTrade(symbol);
+                console.log(`✅ Closed expired trade: ${symbol}`);
+                return res.status(200).send("✅ Trade closed (timeout).");
+            }
+
+            if (position) {
+                console.log(`⚠️ Active position detected for ${symbol}. Skipping opening new.`);
+                return res.status(200).send('Trade already active.');
+            }
+
+            // No active position -> Place new
+            await saveTrade(symbol, side, qty, leverage, sl, tp, close);
+
+            // Set leverage
+            const leverageParams = `symbol=${symbol}&leverage=${leverage}&timestamp=${Date.now()}`;
+            const signatureLeverage = signQuery(leverageParams, secret);
+            const leverageFullURL = `${BASE}/fapi/v1/leverage?${leverageParams}&signature=${signatureLeverage}`;
+            await axios.post(leverageFullURL, null, { headers: { 'X-MBX-APIKEY': key } });
+
+            // Place Market Order
+            const orderParams = `symbol=${symbol}&side=${side}&type=MARKET&quantity=${qty}&timestamp=${Date.now()}`;
+            const signatureOrder = signQuery(orderParams, secret);
+            const orderFullURL = `${BASE}/fapi/v1/order?${orderParams}&signature=${signatureOrder}`;
+            await axios.post(orderFullURL, null, { headers: { 'X-MBX-APIKEY': key } });
+
+            // Set TP
+            const tpSide = side === 'BUY' ? 'SELL' : 'BUY';
+            const tpParams = `symbol=${symbol}&side=${tpSide}&type=TAKE_PROFIT_MARKET&stopPrice=${tp}&closePosition=true&timeInForce=GTC&timestamp=${Date.now()}`;
+            const tpSignature = signQuery(tpParams, secret);
+            const tpFullURL = `${BASE}/fapi/v1/order?${tpParams}&signature=${tpSignature}`;
+            await axios.post(tpFullURL, null, { headers: { 'X-MBX-APIKEY': key } });
+
+            // Set SL
+            const slSide = side === 'BUY' ? 'SELL' : 'BUY';
+            const slParams = `symbol=${symbol}&side=${slSide}&type=STOP_MARKET&stopPrice=${sl}&closePosition=true&timeInForce=GTC&timestamp=${Date.now()}`;
+            const slSignature = signQuery(slParams, secret);
+            const slFullURL = `${BASE}/fapi/v1/order?${slParams}&signature=${slSignature}`;
+            await axios.post(slFullURL, null, { headers: { 'X-MBX-APIKEY': key } });
+
+            console.log(`✅ New trade opened for ${symbol}`);
+            res.status(200).send('✅ New trade opened.');
+        } catch (err) {
+            console.error(err.response?.data || err.message);
+            res.status(500).send('❌ Webhook error');
         }
-
-        if (position) {
-            console.log(`⚠️ Active position detected for ${symbol}. Skipping opening new.`);
-            return res.status(200).send('Trade already active.');
-        }
-
-        // No active position -> Place new
-        await saveTrade(symbol, side, qty, leverage, sl, tp, close);
-
-        // Set leverage
-        const leverageParams = `symbol=${symbol}&leverage=${leverage}&timestamp=${Date.now()}`;
-        const signatureLeverage = signQuery(leverageParams, secret);
-        const leverageFullURL = `${BASE}/fapi/v1/leverage?${leverageParams}&signature=${signatureLeverage}`;
-        await axios.post(leverageFullURL, null, { headers: { 'X-MBX-APIKEY': key } });
-
-        // Place Market Order
-        const orderParams = `symbol=${symbol}&side=${side}&type=MARKET&quantity=${qty}&timestamp=${Date.now()}`;
-        const signatureOrder = signQuery(orderParams, secret);
-        const orderFullURL = `${BASE}/fapi/v1/order?${orderParams}&signature=${signatureOrder}`;
-        await axios.post(orderFullURL, null, { headers: { 'X-MBX-APIKEY': key } });
-
-        // Set TP
-        const tpSide = side === 'BUY' ? 'SELL' : 'BUY';
-        const tpParams = `symbol=${symbol}&side=${tpSide}&type=TAKE_PROFIT_MARKET&stopPrice=${tp}&closePosition=true&timeInForce=GTC&timestamp=${Date.now()}`;
-        const tpSignature = signQuery(tpParams, secret);
-        const tpFullURL = `${BASE}/fapi/v1/order?${tpParams}&signature=${tpSignature}`;
-        await axios.post(tpFullURL, null, { headers: { 'X-MBX-APIKEY': key } });
-
-        // Set SL
-        const slSide = side === 'BUY' ? 'SELL' : 'BUY';
-        const slParams = `symbol=${symbol}&side=${slSide}&type=STOP_MARKET&stopPrice=${sl}&closePosition=true&timeInForce=GTC&timestamp=${Date.now()}`;
-        const slSignature = signQuery(slParams, secret);
-        const slFullURL = `${BASE}/fapi/v1/order?${slParams}&signature=${slSignature}`;
-        await axios.post(slFullURL, null, { headers: { 'X-MBX-APIKEY': key } });
-
-        console.log(`✅ New trade opened for ${symbol}`);
-        res.status(200).send('✅ New trade opened.');
-    } catch (err) {
-        console.error(err.response?.data || err.message);
-        res.status(500).send('❌ Webhook error');
-    }
+    })();
 });
 
 // === Monitor Half TP and Move SL to BE ===
@@ -178,7 +182,7 @@ async function monitorTrades() {
                 : trade.entryPrice - (trade.entryPrice - trade.tp) * 0.5;
 
             const hitHalfTP = (trade.side === 'BUY' && currentPrice >= halfTP) ||
-                              (trade.side === 'SELL' && currentPrice <= halfTP);
+                (trade.side === 'SELL' && currentPrice <= halfTP);
 
             if (!trade.half_closed && hitHalfTP) {
                 console.log(`🎯 Half TP hit for ${trade.symbol}`);
@@ -212,7 +216,7 @@ async function monitorTrades() {
 
 
 // Monitor every 15 seconds
-setInterval(monitorTrades, 15000);
+//setInterval(monitorTrades, 15000);
 
 // === Server Health Check ===
 app.get('/', (req, res) => res.send('✅ Server is Running'));
