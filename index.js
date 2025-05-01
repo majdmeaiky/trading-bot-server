@@ -121,10 +121,12 @@ app.post('/webhook', async (req, res) => {
                 await axios.post(closeURL, null, { headers: { 'X-MBX-APIKEY': key } });
                 await deleteTrade(symbol);
                 console.log(`✅ Closed expired trade: ${symbol}`);
+                return;
             }
 
             if (position) {
                 console.log(`⚠️ Active position detected for ${symbol}. SKIPPING THIS TRADE!.`);
+                return;
             }
 
             // No active position -> Place new
