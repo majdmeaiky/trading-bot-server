@@ -109,7 +109,7 @@ app.post('/webhook', async (req, res) => {
 
             const currentTrade = await getTrade(symbol);
 
-            if (close && position && currentTrade && isTradeTooOld(currentTrade.timeStamp)) {
+            if (close && position && currentTrade ) { //&& isTradeTooOld(currentTrade.timeStamp)
                 // Close expired trade
                 const closeSide = Number(position.positionAmt) > 0 ? 'SELL' : 'BUY';
                 const closeParams = `symbol=${symbol}&side=${closeSide}&type=MARKET&closePosition=true&timestamp=${Date.now()}`;
