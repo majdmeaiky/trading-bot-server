@@ -9,7 +9,7 @@ const app = express();
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 const BASE = 'https://fapi.binance.com';
 const BAR_DURATION_MS = 5 * 60 * 1000; // 5 minutes
-const MAX_BARS = 200;
+const MAX_BARS = 30;
 const MAX_DURATION_MS = BAR_DURATION_MS * MAX_BARS; // 12,000,000 ms
 
 const key = process.env.BINANCE_KEY;
