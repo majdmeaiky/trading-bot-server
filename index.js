@@ -14,6 +14,7 @@ const BASE = 'https://fapi.binance.com';
 const activeTrades = {}; // Keeps all active trades in memory
 let ws = null;           // Holds the current WebSocket connection
 let reconnectTimeout = null;
+let precisionMap = {};
 
 
 const key = process.env.BINANCE_KEY;
@@ -23,6 +24,27 @@ app.use(bodyParser.json());
 app.use(bodyParser.text({ type: "*/*" }));
 
 // === Utility Functions ===
+
+async function fetchPrecisionMap() {
+    const exchangeInfoFullURL = `${BASE}/fapi/v1/exchangeInfo`;
+    const res = await axios.get(exchangeInfoFullURL);
+    for (const symbol of res.data.symbols) {
+        const lot = symbol.filters.find(f => f.filterType === 'LOT_SIZE');
+        const price = symbol.filters.find(f => f.filterType === 'PRICE_FILTER');
+
+        precisionMap[symbol.symbol] = {
+            qtyStep: parseFloat(lot.stepSize),
+            priceTick: parseFloat(price.tickSize),
+        };
+    }
+    console.log("✅ Binance precision map loaded");
+}
+
+function roundToStep(value, step) {
+    return Math.floor(value / step) * step;
+}
+
+
 
 function signQuery(queryString, secret) {
     return crypto.createHmac('sha256', secret).update(queryString).digest('hex');
@@ -98,7 +120,7 @@ function rebuildWebSocket() {
 
     ws.on('message', async (msg) => {
         try {
-            
+
             const parsed = JSON.parse(msg);
             const symbol = parsed.data.s;
             const price = parseFloat(parsed.data.p);
@@ -159,7 +181,7 @@ function rebuildWebSocket() {
     ws.on('close', () => {
         console.log("🔌 WebSocket closed.");
     });
-    
+
     ws.on('error', (err) => {
         console.error("❌ WebSocket error:", err.message);
         if (!reconnectTimeout) {
@@ -189,6 +211,12 @@ app.post('/webhook', async (req, res) => {
         const { symbol, side, qty, leverage, sl, tp, tp1, tp2, entryPrice } = body;
         console.log('✅ Webhook received for:', symbol);
 
+        const precision = precisionMap[symbol];
+        if (!precision) {
+            console.error(`❌ Precision info not found for ${symbol}`);
+            return;
+        }
+
         try {
             const activeOrderParams = `symbol=${symbol}&timestamp=${Date.now()}`;
             const signatureActiveOrder = signQuery(activeOrderParams, secret);
@@ -212,8 +240,6 @@ app.post('/webhook', async (req, res) => {
 
             // No active position -> Place new
 
-           
-
 
             // Set leverage
             const leverageParams = `symbol=${symbol}&leverage=${leverage}&timestamp=${Date.now()}`;
@@ -222,7 +248,7 @@ app.post('/webhook', async (req, res) => {
             await axios.post(leverageFullURL, null, { headers: { 'X-MBX-APIKEY': key } });
 
             // Place Market Order
-            const orderParams = `symbol=${symbol}&side=${side}&type=MARKET&quantity=${qty}&timestamp=${Date.now()}`;
+            const orderParams = `symbol=${symbol}&side=${side}&type=MARKET&quantity=${roundToStep(qty, precision.qtyStep)}&timestamp=${Date.now()}`;
             const signatureOrder = signQuery(orderParams, secret);
             const orderFullURL = `${BASE}/fapi/v1/order?${orderParams}&signature=${signatureOrder}`;
             await axios.post(orderFullURL, null, { headers: { 'X-MBX-APIKEY': key } });
@@ -274,6 +300,7 @@ app.post('/webhook', async (req, res) => {
 app.get('/', (req, res) => res.send('✅ Server is Running'));
 
 app.listen(3000, async () => {
+    await fetchPrecisionMap(); // 🔥 Load precision info first
     console.log('🚀 Server started on port 3000');
 
     const { data: trades, error } = await supabase.from('orders').select('*');
