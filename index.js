@@ -13,6 +13,7 @@ const BASE = 'https://fapi.binance.com';
 
 const activeTrades = {}; // Keeps all active trades in memory
 let ws = null;           // Holds the current WebSocket connection
+let reconnectTimeout = null;
 
 
 const key = process.env.BINANCE_KEY;
@@ -146,7 +147,12 @@ function rebuildWebSocket() {
                 console.log(`🛑 SL HIT for ${symbol} at ${price}`);
                 await supabase.from('orders').delete().eq('symbol', symbol);
                 delete activeTrades[symbol]; // ❌ Remove from memory
-                rebuildWebSocket(); // ♻️ Reconnect WebSocket with updated list
+                
+                // 🔁 Only rebuild if at least one symbol remains
+                if (Object.keys(activeTrades).length > 0) {
+                    console.log("♻️ Rebuilding WebSocket after SL...");
+                    rebuildWebSocket();
+                }
             }
 
         } catch (err) {
@@ -155,11 +161,24 @@ function rebuildWebSocket() {
     });
 
     ws.on('close', () => {
-        console.log("🔌 WebSocket closed. Attempting to reconnect in 3 seconds...");
-        setTimeout(rebuildWebSocket, 3000); // 🛠 Reconnect after 3 seconds
+        console.log("🔌 WebSocket closed.");
+        if (!reconnectTimeout) {
+            reconnectTimeout = setTimeout(() => {
+                reconnectTimeout = null;
+                rebuildWebSocket();
+            }, 5000); // avoid reconnect spam
+        }
     });
     
-    ws.on('error', (err) => console.error("❌ WebSocket error:", err.message));
+    ws.on('error', (err) => {
+        console.error("❌ WebSocket error:", err.message);
+        if (!reconnectTimeout) {
+            reconnectTimeout = setTimeout(() => {
+                reconnectTimeout = null;
+                rebuildWebSocket();
+            }, 5000); // cooldown
+        }
+    });
 }
 
 
