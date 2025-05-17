@@ -4,10 +4,15 @@ const axios = require('axios');
 const crypto = require('crypto');
 require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
+const WebSocket = require('ws');
+
 
 const app = express();
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 const BASE = 'https://fapi.binance.com';
+
+const activeTrades = {}; // Keeps all active trades in memory
+let ws = null;           // Holds the current WebSocket connection
 
 
 const key = process.env.BINANCE_KEY;
@@ -71,14 +76,90 @@ async function deleteTrade(symbol) {
     else console.log("✅ Trade deleted:", symbol);
 }
 
-// async function updateHalfClosed(symbol) {
-//     const { error } = await supabase
-//         .from('orders')
-//         .update({ half_closed: true })
-//         .eq('symbol', symbol);
-//     if (error) console.error("❌ Failed to update half close:", error);
-//     else console.log("✅ Trade updated to half-closed:", symbol);
-// }
+function rebuildWebSocket() {
+    if (ws) {
+        ws.close();
+        console.log("♻️ Rebuilding WebSocket with new symbol list...");
+    }
+
+    const symbols = Object.keys(activeTrades);
+    if (symbols.length === 0) {
+        console.log("🛑 No active trades to monitor. WebSocket not started.");
+        return;
+    }
+
+    const streams = symbols.map(s => `${s.toLowerCase()}@markPrice@1s`).join('/');
+    const wsUrl = `wss://fstream.binance.com/stream?streams=${streams}`;
+
+    ws = new WebSocket(wsUrl);
+
+    ws.on('open', () => console.log(`📡 WebSocket connected for: ${symbols.join(', ')}`));
+
+    ws.on('message', async (msg) => {
+        try {
+            const parsed = JSON.parse(msg);
+            const symbol = parsed.data.s;
+            const price = parseFloat(parsed.data.p);
+            const trade = activeTrades[symbol];
+            if (!trade) return;
+
+            const isLong = trade.side === 'BUY';
+
+            // === TP1 HIT ===
+            if (!trade.tp1_hit && ((isLong && price >= trade.tp1) || (!isLong && price <= trade.tp1))) {
+                console.log(`🎯 TP1 HIT for ${symbol} at ${price}`);
+                const newSL = isLong
+                    ? trade.entryPrice - ((trade.entryPrice - trade.sl) / 2)
+                    : trade.entryPrice + ((trade.sl - trade.entryPrice) / 2);
+
+                trade.sl = newSL;
+                trade.tp1_hit = true;
+                trade.sl_moved_half = true;
+
+                await supabase.from('orders').update({
+                    tp1_hit: true,
+                    sl: newSL,
+                    sl_moved_half: true
+                }).eq('symbol', symbol);
+                console.log(`🔐 SL moved to halfway: ${newSL}`);
+            }
+
+            // === TP2 HIT ===
+            if (!trade.tp2_hit && ((isLong && price >= trade.tp2) || (!isLong && price <= trade.tp2))) {
+                console.log(`🎯 TP2 HIT for ${symbol} at ${price}`);
+                trade.tp2_hit = true;
+                trade.sl = trade.entryPrice;
+                trade.sl_moved_be = true;
+
+                await supabase.from('orders').update({
+                    tp2_hit: true,
+                    sl: trade.entryPrice,
+                    sl_moved_be: true
+                }).eq('symbol', symbol);
+                console.log(`🛡️ SL moved to breakeven`);
+            }
+
+            // === SL HIT ===
+            if ((isLong && price <= trade.sl) || (!isLong && price >= trade.sl)) {
+                console.log(`🛑 SL HIT for ${symbol} at ${price}`);
+                await supabase.from('orders').delete().eq('symbol', symbol);
+                delete activeTrades[symbol]; // ❌ Remove from memory
+                rebuildWebSocket(); // ♻️ Reconnect WebSocket with updated list
+            }
+
+        } catch (err) {
+            console.error("❌ WebSocket message error:", err.message);
+        }
+    });
+
+    ws.on('close', () => {
+        console.log("🔌 WebSocket closed. Attempting to reconnect in 3 seconds...");
+        setTimeout(rebuildWebSocket, 3000); // 🛠 Reconnect after 3 seconds
+    });
+    
+    ws.on('error', (err) => console.error("❌ WebSocket error:", err.message));
+}
+
 
 // === Webhook Endpoint ===
 app.post('/webhook', async (req, res) => {
@@ -119,9 +200,10 @@ app.post('/webhook', async (req, res) => {
             }
 
             // No active position -> Place new
-            
-            await saveTrade(symbol, side, qty, leverage, entryPrice, tp, sl, tp1, tp2);
-            return;
+
+           
+
+
             // Set leverage
             const leverageParams = `symbol=${symbol}&leverage=${leverage}&timestamp=${Date.now()}`;
             const signatureLeverage = signQuery(leverageParams, secret);
@@ -149,6 +231,26 @@ app.post('/webhook', async (req, res) => {
             await axios.post(slFullURL, null, { headers: { 'X-MBX-APIKEY': key } });
 
             console.log(`✅ New trade opened for ${symbol}`);
+
+            await saveTrade(symbol, side, qty, leverage, entryPrice, tp, sl, tp1, tp2);
+            activeTrades[symbol] = {
+                symbol,
+                side,
+                qty,
+                leverage,
+                entryPrice,
+                tp,
+                sl,
+                tp1,
+                tp1_hit: false,
+                tp2,
+                tp2_hit: false,
+                sl_moved_half: false,
+                sl_moved_be: false
+            };
+
+            rebuildWebSocket(); // 🔁 Update the WebSocket with the new trade
+
         } catch (err) {
             console.error(err.response?.data || err.message);
         }
@@ -157,10 +259,21 @@ app.post('/webhook', async (req, res) => {
 
 
 
-// Monitor every 15 seconds
-//setInterval(monitorTrades, 15000);
-
 // === Server Health Check ===
 app.get('/', (req, res) => res.send('✅ Server is Running'));
 
-app.listen(3000, () => console.log('🚀 Server started on port 3000'));
+app.listen(3000, async () => {
+    console.log('🚀 Server started on port 3000');
+
+    const { data: trades, error } = await supabase.from('orders').select('*');
+    if (error) {
+        console.error("❌ Failed to load trades on startup:", error);
+        return;
+    }
+
+    for (const trade of trades) {
+        activeTrades[trade.symbol] = trade;
+    }
+
+    rebuildWebSocket(); // 🚀 Start WebSocket with loaded symbols
+});
