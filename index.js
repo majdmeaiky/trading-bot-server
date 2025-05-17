@@ -101,7 +101,7 @@ function rebuildWebSocket() {
             const parsed = JSON.parse(msg);
             const symbol = parsed.data.s;
             const price = parseFloat(parsed.data.p);
-            console.log(`💹 Price update: ${symbol} = ${price}`);
+            //console.log(`💹 Price update: ${symbol} = ${price}`);
             const trade = activeTrades[symbol];
             if (!trade) return;
 
