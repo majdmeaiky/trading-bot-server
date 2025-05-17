@@ -44,6 +44,90 @@ function roundToStep(value, step) {
     return Math.floor(value / step) * step;
 }
 
+async function reducePosition(symbol, side, qty) {
+    try {
+        const reduceSide = side === 'BUY' ? 'SELL' : 'BUY';
+
+        const precision = precisionMap[symbol];
+        const qtyRounded = roundToStep(qty, precision.qtyStep);
+
+        const params = `symbol=${symbol}&side=${reduceSide}&type=MARKET&quantity=${qtyRounded}&reduceOnly=true&timestamp=${Date.now()}`;
+        const signature = signQuery(params, secret);
+        const url = `${BASE}/fapi/v1/order?${params}&signature=${signature}`;
+
+        const res = await axios.post(url, null, {
+            headers: { 'X-MBX-APIKEY': key },
+        });
+
+        console.log(`💰 Reduced position by ${qtyRounded} on ${symbol}`);
+        return res.data;
+    } catch (err) {
+        console.error(`❌ Failed to reduce position for ${symbol}:`, err.response?.data || err.message);
+    }
+}
+
+async function updateStopLoss(symbol, side, newSL) {
+    try {
+        const precision = precisionMap[symbol];
+        const slRounded = roundToStep(newSL, precision.priceTick);
+        const slSide = side === 'BUY' ? 'SELL' : 'BUY';
+
+        // Step 1: Get all open orders for the symbol
+        const getParams = `symbol=${symbol}&timestamp=${Date.now()}`;
+        const getSig = signQuery(getParams, secret);
+        const getURL = `${BASE}/fapi/v1/openOrders?${getParams}&signature=${getSig}`;
+        const res = await axios.get(getURL, {
+            headers: { 'X-MBX-APIKEY': key }
+        });
+
+        // Step 2: Find only the SL order (not TP)
+        const slOrder = res.data.find(o =>
+            o.type === 'STOP_MARKET' && o.closePosition === true
+        );
+
+        // Step 3: Cancel only the SL order
+        if (slOrder) {
+            const cancelParams = `symbol=${symbol}&orderId=${slOrder.orderId}&timestamp=${Date.now()}`;
+            const cancelSig = signQuery(cancelParams, secret);
+            const cancelURL = `${BASE}/fapi/v1/order?${cancelParams}&signature=${cancelSig}`;
+            await axios.delete(cancelURL, {
+                headers: { 'X-MBX-APIKEY': key }
+            });
+            console.log(`❎ Canceled old SL order (ID: ${slOrder.orderId}) for ${symbol}`);
+        }
+
+        // Step 4: Place new SL
+        const slParams = `symbol=${symbol}&side=${slSide}&type=STOP_MARKET&stopPrice=${slRounded}&closePosition=true&timeInForce=GTC&timestamp=${Date.now()}`;
+        const slSig = signQuery(slParams, secret);
+        const slURL = `${BASE}/fapi/v1/order?${slParams}&signature=${slSig}`;
+        await axios.post(slURL, null, {
+            headers: { 'X-MBX-APIKEY': key }
+        });
+
+        console.log(`🔄 New SL placed for ${symbol} at ${slRounded}`);
+    } catch (err) {
+        console.error(`❌ SL update failed for ${symbol}:`, err.response?.data || err.message);
+    }
+}
+
+async function reducePosition(symbol, side, qty) {
+    try {
+        const reduceSide = side === 'BUY' ? 'SELL' : 'BUY';
+        const precision = precisionMap[symbol];
+        const qtyRounded = roundToStep(qty, precision.qtyStep);
+
+        const params = `symbol=${symbol}&side=${reduceSide}&type=MARKET&quantity=${qtyRounded}&reduceOnly=true&timestamp=${Date.now()}`;
+        const sig = signQuery(params, secret);
+        const url = `${BASE}/fapi/v1/order?${params}&signature=${sig}`;
+        await axios.post(url, null, {
+            headers: { 'X-MBX-APIKEY': key }
+        });
+
+        console.log(`💰 Reduced ${qtyRounded} from ${symbol} at market`);
+    } catch (err) {
+        console.error(`❌ Failed to reduce position (${symbol}):`, err.response?.data || err.message);
+    }
+}
 
 
 function signQuery(queryString, secret) {
@@ -90,15 +174,6 @@ async function getTrade(symbol) {
     return data;
 }
 
-async function deleteTrade(symbol) {
-    const { error } = await supabase
-        .from('orders')
-        .delete()
-        .eq('symbol', symbol);
-    if (error) console.error("❌ Failed to delete trade:", error);
-    else console.log("✅ Trade deleted:", symbol);
-}
-
 function rebuildWebSocket() {
     if (ws) {
         ws.close();
@@ -132,35 +207,61 @@ function rebuildWebSocket() {
 
             // === TP1 HIT ===
             if (!trade.tp1_hit && ((isLong && price >= trade.tp1) || (!isLong && price <= trade.tp1))) {
+
                 console.log(`🎯 TP1 HIT for ${symbol} at ${price}`);
+
                 const newSL = isLong
                     ? trade.entryPrice - ((trade.entryPrice - trade.sl) / 2)
                     : trade.entryPrice + ((trade.sl - trade.entryPrice) / 2);
 
+                // Reduce 40%
+                const reduceQty = trade.qty * 0.4;
+                await reducePosition(symbol, trade.side, reduceQty);
+
+                // Update SL on Binance
+                await updateStopLoss(symbol, trade.side, newSL);
+                console.log(`🔐 SL moved to halfway: ${newSL}`);
+
                 trade.sl = newSL;
                 trade.tp1_hit = true;
                 trade.sl_moved_half = true;
+                trade.qty = trade.qty * 0.6;
+
 
                 await supabase.from('orders').update({
+                    qty: trade.qty,
                     tp1_hit: true,
                     sl: newSL,
                     sl_moved_half: true
                 }).eq('symbol', symbol);
-                console.log(`🔐 SL moved to halfway: ${newSL}`);
             }
 
             // === TP2 HIT ===
             if (!trade.tp2_hit && ((isLong && price >= trade.tp2) || (!isLong && price <= trade.tp2))) {
+
                 console.log(`🎯 TP2 HIT for ${symbol} at ${price}`);
+
+                  // Reduce 40%
+                  const reduceQty = trade.qty * 0.6;
+                  await reducePosition(symbol, trade.side, reduceQty);
+  
+                  // Update SL on Binance
+                  await updateStopLoss(symbol, trade.side, trade.entryPrice);
+                  console.log(`🔐 SL moved to breakeven: ${trade.entryPrice}`);
+  
+
                 trade.tp2_hit = true;
                 trade.sl = trade.entryPrice;
                 trade.sl_moved_be = true;
+                trade.qty = trade.qty * 0.4;
 
                 await supabase.from('orders').update({
+                    qty: trade.qty,
                     tp2_hit: true,
                     sl: trade.entryPrice,
                     sl_moved_be: true
                 }).eq('symbol', symbol);
+                
                 console.log(`🛡️ SL moved to breakeven`);
             }
 
