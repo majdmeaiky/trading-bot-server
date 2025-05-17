@@ -166,7 +166,7 @@ function rebuildWebSocket() {
             reconnectTimeout = setTimeout(() => {
                 reconnectTimeout = null;
                 rebuildWebSocket();
-            }, 5000); // avoid reconnect spam
+            }, 80000); // avoid reconnect spam
         }
     });
     
