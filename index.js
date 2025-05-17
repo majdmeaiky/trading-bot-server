@@ -147,12 +147,8 @@ function rebuildWebSocket() {
                 console.log(`🛑 SL HIT for ${symbol} at ${price}`);
                 await supabase.from('orders').delete().eq('symbol', symbol);
                 delete activeTrades[symbol]; // ❌ Remove from memory
-                
-                // 🔁 Only rebuild if at least one symbol remains
-                if (Object.keys(activeTrades).length > 0) {
-                    console.log("♻️ Rebuilding WebSocket after SL...");
-                    rebuildWebSocket();
-                }
+                console.log("♻️ Rebuilding WebSocket after SL...");
+                rebuildWebSocket();
             }
 
         } catch (err) {
