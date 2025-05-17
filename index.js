@@ -162,12 +162,6 @@ function rebuildWebSocket() {
 
     ws.on('close', () => {
         console.log("🔌 WebSocket closed.");
-        if (!reconnectTimeout) {
-            reconnectTimeout = setTimeout(() => {
-                reconnectTimeout = null;
-                rebuildWebSocket();
-            }, 80000); // avoid reconnect spam
-        }
     });
     
     ws.on('error', (err) => {
