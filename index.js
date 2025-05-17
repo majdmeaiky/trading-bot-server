@@ -97,10 +97,11 @@ function rebuildWebSocket() {
 
     ws.on('message', async (msg) => {
         try {
-            console.log(`💹 Price update: ${symbol} = ${price}`);
+            
             const parsed = JSON.parse(msg);
             const symbol = parsed.data.s;
             const price = parseFloat(parsed.data.p);
+            console.log(`💹 Price update: ${symbol} = ${price}`);
             const trade = activeTrades[symbol];
             if (!trade) return;
 
