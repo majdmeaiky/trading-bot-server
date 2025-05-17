@@ -110,26 +110,6 @@ async function updateStopLoss(symbol, side, newSL) {
     }
 }
 
-async function reducePosition(symbol, side, qty) {
-    try {
-        const reduceSide = side === 'BUY' ? 'SELL' : 'BUY';
-        const precision = precisionMap[symbol];
-        const qtyRounded = roundToStep(qty, precision.qtyStep);
-
-        const params = `symbol=${symbol}&side=${reduceSide}&type=MARKET&quantity=${qtyRounded}&reduceOnly=true&timestamp=${Date.now()}`;
-        const sig = signQuery(params, secret);
-        const url = `${BASE}/fapi/v1/order?${params}&signature=${sig}`;
-        await axios.post(url, null, {
-            headers: { 'X-MBX-APIKEY': key }
-        });
-
-        console.log(`💰 Reduced ${qtyRounded} from ${symbol} at market`);
-    } catch (err) {
-        console.error(`❌ Failed to reduce position (${symbol}):`, err.response?.data || err.message);
-    }
-}
-
-
 function signQuery(queryString, secret) {
     return crypto.createHmac('sha256', secret).update(queryString).digest('hex');
 }
@@ -161,18 +141,6 @@ async function saveTrade(symbol, side, qty, leverage, entryPrice, tp, sl, tp1, t
     else console.log("✅ Trade saved:", symbol);
 }
 
-async function getTrade(symbol) {
-    const { data, error } = await supabase
-        .from('orders')
-        .select('*')
-        .eq('symbol', symbol)
-        .single();
-    if (error) {
-        console.error("❌ Failed to load trade:", error);
-        return null;
-    }
-    return data;
-}
 
 function rebuildWebSocket() {
     if (ws) {
@@ -329,18 +297,11 @@ app.post('/webhook', async (req, res) => {
             const allPositions = positionRes.data;
             const position = allPositions.find(p => p.symbol === symbol && Math.abs(Number(p.positionAmt)) > 0);
 
-            const currentTrade = await getTrade(symbol);
-            console.log('position', position);
-            console.log('currentTrade', currentTrade);
-
 
             if (position) {
                 console.log(`⚠️ Active position detected for ${symbol}. SKIPPING THIS TRADE!.`);
                 return;
             }
-
-            // No active position -> Place new
-
 
             // Set leverage
             const leverageParams = `symbol=${symbol}&leverage=${leverage}&timestamp=${Date.now()}`;
