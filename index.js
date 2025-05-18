@@ -41,7 +41,9 @@ async function fetchPrecisionMap() {
 }
 
 function roundToStep(value, step) {
-    return Math.floor(value / step) * step;
+    const rounded = Math.floor(value / step) * step;
+    const decimals = step.toString().split('.')[1]?.length || 0;
+    return Number(rounded.toFixed(decimals));
 }
 
 async function reducePosition(symbol, side, qty) {
