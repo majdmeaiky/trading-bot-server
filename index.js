@@ -157,7 +157,7 @@ function rebuildWebSocket() {
         return;
     }
 
-    const streams = symbols.map(s => `${s.toLowerCase()}@markPrice@1s`).join('/');
+    const streams = symbols.map(s => `${s.toLowerCase()}@aggTrade`).join('/');
     const wsUrl = `wss://fstream.binance.com/stream?streams=${streams}`;
 
     ws = new WebSocket(wsUrl);
@@ -185,8 +185,8 @@ function rebuildWebSocket() {
                 (!isLong && price <= halfRLevel)
             )) {
                 const halfRiskSL = isLong
-                    ? trade.entryPrice - ((trade.entryPrice - trade.sl) * 0.2)
-                    : trade.entryPrice + ((trade.sl - trade.entryPrice) * 0.2);
+                    ? trade.entryPrice - ((trade.entryPrice - trade.sl) * 0.4)
+                    : trade.entryPrice + ((trade.sl - trade.entryPrice) * 0.4);
 
                 await updateStopLoss(symbol, trade.side, halfRiskSL);
                 trade.sl = halfRiskSL;
