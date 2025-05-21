@@ -330,6 +330,7 @@ function rebuildWebSocket() {
                 trade.sl_hit = true;
                 console.log(`🛑 SL HIT for ${symbol} at ${price}`);
                 await cancelAllOpenOrders(symbol);
+                await forceClosePosition(symbol);
                 await supabase.from('orders').delete().eq('symbol', symbol);
                 delete activeTrades[symbol];
                 if (!reconnectTimeout) {
