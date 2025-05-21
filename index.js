@@ -122,6 +122,49 @@ async function updateStopLoss(symbol, side, newSL) {
     }
 }
 
+async function cancelAllOpenOrders(symbol) {
+    try {
+        const params = `symbol=${symbol}&timestamp=${Date.now()}`;
+        const sig = signQuery(params, secret);
+        const url = `${BASE}/fapi/v1/allOpenOrders?${params}&signature=${sig}`;
+        await axios.delete(url, { headers: { 'X-MBX-APIKEY': key } });
+        console.log(`🧹 All open orders canceled for ${symbol}`);
+    } catch (err) {
+        console.error(`❌ Cancel failed for ${symbol}:`, err.response?.data || err.message);
+    }
+}
+
+
+async function forceClosePosition(symbol) {
+    try {
+        const params = `timestamp=${Date.now()}`;
+        const sig = signQuery(params, secret);
+        const url = `${BASE}/fapi/v2/positionRisk?${params}&signature=${sig}`;
+        const res = await axios.get(url, { headers: { 'X-MBX-APIKEY': key } });
+
+        const position = res.data.find(p =>
+            p.symbol === symbol && Math.abs(Number(p.positionAmt)) > 0
+        );
+
+        if (!position) {
+            console.log(`ℹ️ No active position to close for ${symbol}`);
+            return;
+        }
+
+        const side = Number(position.positionAmt) > 0 ? 'SELL' : 'BUY';
+        const closeParams = `symbol=${symbol}&side=${side}&type=MARKET&closePosition=true&timestamp=${Date.now()}`;
+        const closeSig = signQuery(closeParams, secret);
+        const closeURL = `${BASE}/fapi/v1/order?${closeParams}&signature=${closeSig}`;
+        await axios.post(closeURL, null, { headers: { 'X-MBX-APIKEY': key } });
+
+        console.log(`✅ Force-closed position for ${symbol} with ${side}`);
+    } catch (err) {
+        console.error(`❌ Force-close failed for ${symbol}:`, err.response?.data || err.message);
+    }
+}
+
+
+
 function signQuery(queryString, secret) {
     return crypto.createHmac('sha256', secret).update(queryString).digest('hex');
 }
@@ -147,6 +190,7 @@ async function saveTrade(symbol, side, qty, leverage, entryPrice, tp, sl, tp1, t
             sl_moved_half: false,
             sl_moved_be: false,
             sl_moved_1R: false,
+            sl_hit: false,
             timeStamp: Date.now()
         }], { onConflict: ['symbol'] });
 
@@ -190,17 +234,14 @@ function rebuildWebSocket() {
                 ? trade.entryPrice + (trade.tp1 - trade.entryPrice) * 0.5
                 : trade.entryPrice - (trade.entryPrice - trade.tp1) * 0.5;
 
-            if (!trade.sl_moved_half && (
-                (isLong && price >= halfRLevel) ||
-                (!isLong && price <= halfRLevel)
-            )) {
-                
+            if (!trade.sl_moved_half && ((isLong && price >= halfRLevel) || (!isLong && price <= halfRLevel))) {
+
                 trade.sl_moved_half = true;
                 await supabase.from('orders').update({ sl_moved_half: true }).eq('symbol', symbol);
 
                 const halfRiskSL = isLong
-                    ? trade.entryPrice - ((trade.entryPrice - trade.sl) * 0.4)
-                    : trade.entryPrice + ((trade.sl - trade.entryPrice) * 0.4);
+                    ? trade.entryPrice - ((trade.entryPrice - trade.sl) * 0.5)
+                    : trade.entryPrice + ((trade.sl - trade.entryPrice) * 0.5);
 
                 try {
                     await updateStopLoss(symbol, trade.side, halfRiskSL);
@@ -285,12 +326,19 @@ function rebuildWebSocket() {
             }
 
             // === SL HIT ===
-            if ((isLong && price <= trade.sl) || (!isLong && price >= trade.sl)) {
+            if (!trade.sl_hit && ((isLong && price <= trade.sl) || (!isLong && price >= trade.sl))) {
+                trade.sl_hit = true;
                 console.log(`🛑 SL HIT for ${symbol} at ${price}`);
+
                 await supabase.from('orders').delete().eq('symbol', symbol);
-                delete activeTrades[symbol]; // ❌ Remove from memory
-                console.log("♻️ Rebuilding WebSocket after SL...");
-                rebuildWebSocket();
+                delete activeTrades[symbol];
+                if (!reconnectTimeout) {
+                    console.log("♻️ Rebuilding WebSocket after SL...");
+                    reconnectTimeout = setTimeout(() => {
+                        reconnectTimeout = null;
+                        rebuildWebSocket();
+                    }, 500); // cooldown
+                }
             }
 
         } catch (err) {
@@ -338,21 +386,42 @@ app.post('/webhook', async (req, res) => {
         }
 
         try {
-            const activeOrderParams = `symbol=${symbol}&timestamp=${Date.now()}`;
-            const signatureActiveOrder = signQuery(activeOrderParams, secret);
-            const activeOrderFullURL = `${BASE}/fapi/v2/positionRisk?${activeOrderParams}&signature=${signatureActiveOrder}`;
-            const positionRes = await axios.get(activeOrderFullURL, {
-                headers: { 'X-MBX-APIKEY': key }
-            });
+            const existingTrade = activeTrades[symbol];
+            if (existingTrade) {
+                const existingSide = existingTrade.side;
 
-            const allPositions = positionRes.data;
-            const position = allPositions.find(p => p.symbol === symbol && Math.abs(Number(p.positionAmt)) > 0);
+                if ((side === 'BUY' && existingSide === 'SELL') || (side === 'SELL' && existingSide === 'BUY')) {
+                    console.log(`🔁 Opposite trade exists for ${symbol}. Cleaning before new ${side} trade...`);
 
+                    await cancelAllOpenOrders(symbol);
+                    await forceClosePosition(symbol);
 
-            if (position) {
-                console.log(`⚠️ Active position detected for ${symbol}. SKIPPING THIS TRADE!.`);
-                return;
+                    delete activeTrades[symbol];
+                    await supabase.from('orders').delete().eq('symbol', symbol);
+
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                } else {
+                    console.warn(`⚠️ Trade for ${symbol} already in same direction (${side}). Skipping.`);
+                    return;
+                }
             }
+
+
+            // const activeOrderParams = `symbol=${symbol}&timestamp=${Date.now()}`;
+            // const signatureActiveOrder = signQuery(activeOrderParams, secret);
+            // const activeOrderFullURL = `${BASE}/fapi/v2/positionRisk?${activeOrderParams}&signature=${signatureActiveOrder}`;
+            // const positionRes = await axios.get(activeOrderFullURL, {
+            //     headers: { 'X-MBX-APIKEY': key }
+            // });
+
+            // const allPositions = positionRes.data;
+            // const position = allPositions.find(p => p.symbol === symbol && Math.abs(Number(p.positionAmt)) > 0);
+
+
+            // if (position) {
+            //     console.log(`⚠️ Active position detected for ${symbol}. SKIPPING THIS TRADE!.`);
+            //     return;
+            // }
 
             // Set leverage
             const leverageParams = `symbol=${symbol}&leverage=${leverage}&timestamp=${Date.now()}`;
@@ -397,7 +466,8 @@ app.post('/webhook', async (req, res) => {
                 tp2_hit: false,
                 sl_moved_half: false,
                 sl_moved_be: false,
-                sl_moved_1R: false
+                sl_moved_1R: false,
+                sl_hit: false
             };
 
             rebuildWebSocket(); // 🔁 Update the WebSocket with the new trade
