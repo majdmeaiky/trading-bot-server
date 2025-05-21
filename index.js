@@ -329,7 +329,7 @@ function rebuildWebSocket() {
             if (!trade.sl_hit && ((isLong && price <= trade.sl) || (!isLong && price >= trade.sl))) {
                 trade.sl_hit = true;
                 console.log(`🛑 SL HIT for ${symbol} at ${price}`);
-
+                await cancelAllOpenOrders(symbol);
                 await supabase.from('orders').delete().eq('symbol', symbol);
                 delete activeTrades[symbol];
                 if (!reconnectTimeout) {
