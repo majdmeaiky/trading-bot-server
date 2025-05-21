@@ -89,14 +89,24 @@ async function updateStopLoss(symbol, side, newSL) {
 
         // Step 3: Cancel only the SL order
         if (slOrder) {
-            const cancelParams = `symbol=${symbol}&orderId=${slOrder.orderId}&timestamp=${Date.now()}`;
-            const cancelSig = signQuery(cancelParams, secret);
-            const cancelURL = `${BASE}/fapi/v1/order?${cancelParams}&signature=${cancelSig}`;
-            await axios.delete(cancelURL, {
-                headers: { 'X-MBX-APIKEY': key }
-            });
-            console.log(`❎ Canceled old SL order (ID: ${slOrder.orderId}) for ${symbol}`);
+            try {
+                const cancelParams = `symbol=${symbol}&orderId=${slOrder.orderId}&timestamp=${Date.now()}`;
+                const cancelSig = signQuery(cancelParams, secret);
+                const cancelURL = `${BASE}/fapi/v1/order?${cancelParams}&signature=${cancelSig}`;
+                await axios.delete(cancelURL, {
+                    headers: { 'X-MBX-APIKEY': key }
+                });
+                console.log(`❎ Canceled old SL order (ID: ${slOrder.orderId}) for ${symbol}`);
+            }
+            catch (cancelErr) {
+                const msg = cancelErr.response?.data?.msg || cancelErr.message;
+                console.warn(`⚠️ Cancel failed for ${symbol}: ${msg}`);
+            }
         }
+        else {
+            console.warn(`⚠️ No SL found to cancel for ${symbol}`);
+        }
+
 
         // Step 4: Place new SL
         const slParams = `symbol=${symbol}&side=${slSide}&type=STOP_MARKET&stopPrice=${slRounded}&closePosition=true&timeInForce=GTC&timestamp=${Date.now()}`;
@@ -184,18 +194,26 @@ function rebuildWebSocket() {
                 (isLong && price >= halfRLevel) ||
                 (!isLong && price <= halfRLevel)
             )) {
+                
+                trade.sl_moved_half = true;
+                await supabase.from('orders').update({ sl_moved_half: true }).eq('symbol', symbol);
+
                 const halfRiskSL = isLong
                     ? trade.entryPrice - ((trade.entryPrice - trade.sl) * 0.4)
                     : trade.entryPrice + ((trade.sl - trade.entryPrice) * 0.4);
 
-                await updateStopLoss(symbol, trade.side, halfRiskSL);
-                trade.sl = halfRiskSL;
-                trade.sl_moved_half = true;
+                try {
+                    await updateStopLoss(symbol, trade.side, halfRiskSL);
+                    trade.sl = halfRiskSL;
 
-                await supabase.from('orders').update({
-                    sl_moved_half: true,
-                    sl: halfRiskSL
-                }).eq('symbol', symbol);
+                    await supabase.from('orders').update({
+                        sl: halfRiskSL
+                    }).eq('symbol', symbol);
+                }
+                catch (err) {
+                    console.error("0.5R SL move failed");
+                }
+
 
                 console.log(`🔒 SL moved to partial-risk (-0.2R) at ${halfRiskSL} for ${symbol}`);
             }
@@ -203,6 +221,8 @@ function rebuildWebSocket() {
 
             // === TP1 HIT ===
             if (!trade.tp1_hit && ((isLong && price >= trade.tp1) || (!isLong && price <= trade.tp1))) {
+                trade.tp1_hit = true;
+                await supabase.from('orders').update({ tp1_hit: true }).eq('symbol', symbol);
 
                 console.log(`🎯 TP1 HIT for ${symbol} at ${price}`);
 
@@ -210,26 +230,31 @@ function rebuildWebSocket() {
                 const reduceQty = trade.qty * 0.3;
                 await reducePosition(symbol, trade.side, reduceQty);
 
-                // Update SL on Binance
-                await updateStopLoss(symbol, trade.side, trade.entryPrice);
-                console.log(`🔐 SL moved to BE: ${trade.entryPrice}`);
+                try {// Update SL on Binance
+                    await updateStopLoss(symbol, trade.side, trade.entryPrice);
+                    console.log(`🔐 SL moved to BE: ${trade.entryPrice}`);
 
-                trade.sl = trade.entryPrice;
-                trade.tp1_hit = true;
-                trade.sl_moved_be = true;
-                trade.qty = trade.qty * 0.7;
+                    trade.sl = trade.entryPrice;
+                    trade.sl_moved_be = true;
+                    trade.qty = trade.qty * 0.7;
 
 
-                await supabase.from('orders').update({
-                    qty: trade.qty,
-                    tp1_hit: true,
-                    sl: trade.entryPrice,
-                    sl_moved_be: true
-                }).eq('symbol', symbol);
+                    await supabase.from('orders').update({
+                        qty: trade.qty,
+                        sl: trade.entryPrice,
+                        sl_moved_be: true
+                    }).eq('symbol', symbol);
+                }
+                catch (err) {
+                    console.error("TP1 SL move to BE failed");
+                }
+
             }
 
             // === TP2 HIT ===
             if (!trade.tp2_hit && ((isLong && price >= trade.tp2) || (!isLong && price <= trade.tp2))) {
+                trade.tp2_hit = true;
+                await supabase.from('orders').update({ tp2_hit: true }).eq('symbol', symbol);
 
                 console.log(`🎯 TP2 HIT for ${symbol} at ${price}`);
 
@@ -237,24 +262,26 @@ function rebuildWebSocket() {
                 const reduceQty = trade.qty * 0.3;
                 await reducePosition(symbol, trade.side, reduceQty);
 
-                // Update SL on Binance
-                await updateStopLoss(symbol, trade.side, trade.tp1);
-                console.log(`🔐 SL moved to TP1 LEVEL: ${trade.tp1}`);
+                try {// Update SL on Binance
+                    await updateStopLoss(symbol, trade.side, trade.tp1);
+                    console.log(`🔐 SL moved to TP1 LEVEL: ${trade.tp1}`);
 
 
-                trade.tp2_hit = true;
-                trade.sl = trade.tp1;
-                trade.sl_moved_1R = true;
-                trade.qty = trade.qty * 0.7;
+                    trade.sl = trade.tp1;
+                    trade.sl_moved_1R = true;
+                    trade.qty = trade.qty * 0.7;
 
-                await supabase.from('orders').update({
-                    qty: trade.qty,
-                    tp2_hit: true,
-                    sl: trade.tp1,
-                    sl_moved_1R: true
-                }).eq('symbol', symbol);
+                    await supabase.from('orders').update({
+                        qty: trade.qty,
+                        sl: trade.tp1,
+                        sl_moved_1R: true
+                    }).eq('symbol', symbol);
 
-                console.log(`🛡️ SL moved to breakeven`);
+                    console.log(`🛡️ SL moved to breakeven`);
+                }
+                catch (err) {
+                    console.error("TP2 SL move to TP1 failed");
+                }
             }
 
             // === SL HIT ===
