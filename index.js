@@ -191,6 +191,7 @@ async function saveTrade(symbol, side, qty, leverage, entryPrice, tp, sl, tp1, t
             sl_moved_be: false,
             sl_moved_1R: false,
             sl_hit: false,
+            tp_hit: false,
             timeStamp: Date.now()
         }], { onConflict: ['symbol'] });
 
@@ -325,6 +326,23 @@ function rebuildWebSocket() {
                 }
             }
 
+            // === TP HIT ===
+            if (!trade.tp_hit && ((isLong && price >= trade.tp) || (!isLong && price <= trade.tp))) {
+                trade.tp_hit = true;
+                console.log(`✅ TP HIT for ${symbol} at ${price}`);
+                await cancelAllOpenOrders(symbol);
+                await forceClosePosition(symbol);
+                await supabase.from('orders').delete().eq('symbol', symbol);
+                delete activeTrades[symbol];
+                if (!reconnectTimeout) {
+                    console.log("♻️ Rebuilding WebSocket after TP...");
+                    reconnectTimeout = setTimeout(() => {
+                        reconnectTimeout = null;
+                        rebuildWebSocket();
+                    }, 500); // cooldown
+                }
+            }
+
             // === SL HIT ===
             if (!trade.sl_hit && ((isLong && price <= trade.sl) || (!isLong && price >= trade.sl))) {
                 trade.sl_hit = true;
@@ -392,7 +410,7 @@ app.post('/webhook', async (req, res) => {
                 console.warn(`⚠️ Trade for ${symbol} already in same direction (${side}). Skipping.`);
                 return;
             }
-        
+
 
 
             // const activeOrderParams = `symbol=${symbol}&timestamp=${Date.now()}`;
@@ -412,58 +430,59 @@ app.post('/webhook', async (req, res) => {
             // }
 
             // Set leverage
-        const leverageParams = `symbol=${symbol}&leverage=${leverage}&timestamp=${Date.now()}`;
-        const signatureLeverage = signQuery(leverageParams, secret);
-        const leverageFullURL = `${BASE}/fapi/v1/leverage?${leverageParams}&signature=${signatureLeverage}`;
-        await axios.post(leverageFullURL, null, { headers: { 'X-MBX-APIKEY': key } });
+            const leverageParams = `symbol=${symbol}&leverage=${leverage}&timestamp=${Date.now()}`;
+            const signatureLeverage = signQuery(leverageParams, secret);
+            const leverageFullURL = `${BASE}/fapi/v1/leverage?${leverageParams}&signature=${signatureLeverage}`;
+            await axios.post(leverageFullURL, null, { headers: { 'X-MBX-APIKEY': key } });
 
-        // Place Market Order
-        const orderParams = `symbol=${symbol}&side=${side}&type=MARKET&quantity=${roundToStep(qty, precision.qtyStep)}&timestamp=${Date.now()}`;
-        const signatureOrder = signQuery(orderParams, secret);
-        const orderFullURL = `${BASE}/fapi/v1/order?${orderParams}&signature=${signatureOrder}`;
-        await axios.post(orderFullURL, null, { headers: { 'X-MBX-APIKEY': key } });
+            // Place Market Order
+            const orderParams = `symbol=${symbol}&side=${side}&type=MARKET&quantity=${roundToStep(qty, precision.qtyStep)}&timestamp=${Date.now()}`;
+            const signatureOrder = signQuery(orderParams, secret);
+            const orderFullURL = `${BASE}/fapi/v1/order?${orderParams}&signature=${signatureOrder}`;
+            await axios.post(orderFullURL, null, { headers: { 'X-MBX-APIKEY': key } });
 
-        // Set TP
-        const tpSide = side === 'BUY' ? 'SELL' : 'BUY';
-        const tpParams = `symbol=${symbol}&side=${tpSide}&type=TAKE_PROFIT_MARKET&stopPrice=${tp}&closePosition=true&timeInForce=GTC&timestamp=${Date.now()}`;
-        const tpSignature = signQuery(tpParams, secret);
-        const tpFullURL = `${BASE}/fapi/v1/order?${tpParams}&signature=${tpSignature}`;
-        await axios.post(tpFullURL, null, { headers: { 'X-MBX-APIKEY': key } });
+            // Set TP
+            const tpSide = side === 'BUY' ? 'SELL' : 'BUY';
+            const tpParams = `symbol=${symbol}&side=${tpSide}&type=TAKE_PROFIT_MARKET&stopPrice=${tp}&closePosition=true&timeInForce=GTC&timestamp=${Date.now()}`;
+            const tpSignature = signQuery(tpParams, secret);
+            const tpFullURL = `${BASE}/fapi/v1/order?${tpParams}&signature=${tpSignature}`;
+            await axios.post(tpFullURL, null, { headers: { 'X-MBX-APIKEY': key } });
 
-        // Set SL
-        const slSide = side === 'BUY' ? 'SELL' : 'BUY';
-        const slParams = `symbol=${symbol}&side=${slSide}&type=STOP_MARKET&stopPrice=${sl}&closePosition=true&timeInForce=GTC&timestamp=${Date.now()}`;
-        const slSignature = signQuery(slParams, secret);
-        const slFullURL = `${BASE}/fapi/v1/order?${slParams}&signature=${slSignature}`;
-        await axios.post(slFullURL, null, { headers: { 'X-MBX-APIKEY': key } });
+            // Set SL
+            const slSide = side === 'BUY' ? 'SELL' : 'BUY';
+            const slParams = `symbol=${symbol}&side=${slSide}&type=STOP_MARKET&stopPrice=${sl}&closePosition=true&timeInForce=GTC&timestamp=${Date.now()}`;
+            const slSignature = signQuery(slParams, secret);
+            const slFullURL = `${BASE}/fapi/v1/order?${slParams}&signature=${slSignature}`;
+            await axios.post(slFullURL, null, { headers: { 'X-MBX-APIKEY': key } });
 
-        console.log(`✅ New trade opened for ${symbol}`);
+            console.log(`✅ New trade opened for ${symbol}`);
 
-        await saveTrade(symbol, side, qty, leverage, entryPrice, tp, sl, tp1, tp2);
-        activeTrades[symbol] = {
-            symbol,
-            side,
-            qty,
-            leverage,
-            entryPrice,
-            tp,
-            sl,
-            tp1,
-            tp1_hit: false,
-            tp2,
-            tp2_hit: false,
-            sl_moved_half: false,
-            sl_moved_be: false,
-            sl_moved_1R: false,
-            sl_hit: false
-        };
+            await saveTrade(symbol, side, qty, leverage, entryPrice, tp, sl, tp1, tp2);
+            activeTrades[symbol] = {
+                symbol,
+                side,
+                qty,
+                leverage,
+                entryPrice,
+                tp,
+                sl,
+                tp1,
+                tp1_hit: false,
+                tp2,
+                tp2_hit: false,
+                sl_moved_half: false,
+                sl_moved_be: false,
+                sl_moved_1R: false,
+                sl_hit: false,
+                tp_hit: false
+            };
 
-        rebuildWebSocket(); // 🔁 Update the WebSocket with the new trade
+            rebuildWebSocket(); // 🔁 Update the WebSocket with the new trade
 
-    } catch (err) {
-        console.error(err.response?.data || err.message);
-    }
-})();
+        } catch (err) {
+            console.error(err.response?.data || err.message);
+        }
+    })();
 });
 
 
