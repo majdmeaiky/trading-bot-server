@@ -220,9 +220,6 @@ function rebuildWebSocket() {
     ws.on('open', () => console.log(`📡 WebSocket connected for: ${symbols.join(', ')}`));
 
     ws.on('message', async (msg) => {
-        const halfRLevel = isLong
-        ? trade.entryPrice + (trade.tp1 - trade.entryPrice) * 0.5
-        : trade.entryPrice - (trade.entryPrice - trade.tp1) * 0.5;
 
         try {
 
@@ -233,7 +230,10 @@ function rebuildWebSocket() {
             if (!trade) return;
 
             const isLong = trade.side === 'BUY';
-
+            const halfRLevel = isLong
+            ? trade.entryPrice + (trade.tp1 - trade.entryPrice) * 0.5
+            : trade.entryPrice - (trade.entryPrice - trade.tp1) * 0.5;
+    
             // === 0.5R SL MOVE (calc from tp1) ===
 
 
