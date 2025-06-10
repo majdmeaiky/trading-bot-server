@@ -220,6 +220,10 @@ function rebuildWebSocket() {
     ws.on('open', () => console.log(`📡 WebSocket connected for: ${symbols.join(', ')}`));
 
     ws.on('message', async (msg) => {
+        const halfRLevel = isLong
+        ? trade.entryPrice + (trade.tp1 - trade.entryPrice) * 0.5
+        : trade.entryPrice - (trade.entryPrice - trade.tp1) * 0.5;
+
         try {
 
             const parsed = JSON.parse(msg);
@@ -231,9 +235,8 @@ function rebuildWebSocket() {
             const isLong = trade.side === 'BUY';
 
             // === 0.5R SL MOVE (calc from tp1) ===
-            const halfRLevel = isLong
-                ? trade.entryPrice + (trade.tp1 - trade.entryPrice) * 0.5
-                : trade.entryPrice - (trade.entryPrice - trade.tp1) * 0.5;
+
+
 
             if (!trade.sl_moved_half && ((isLong && price >= halfRLevel) || (!isLong && price <= halfRLevel))) {
 
@@ -273,17 +276,17 @@ function rebuildWebSocket() {
                 await reducePosition(symbol, trade.side, reduceQty);
 
                 try {// Update SL on Binance
-                    await updateStopLoss(symbol, trade.side, trade.entryPrice);
-                    console.log(`🔐 SL moved to BE: ${trade.entryPrice}`);
+                    await updateStopLoss(symbol, trade.side, halfRLevel);
+                    console.log(`🔐 SL moved to BE: ${halfRLevel}`);
 
-                    trade.sl = trade.entryPrice;
+                    trade.sl = halfRLevel;
                     trade.sl_moved_be = true;
                     trade.qty = trade.qty * 0.7;
 
 
                     await supabase.from('orders').update({
                         qty: trade.qty,
-                        sl: trade.entryPrice,
+                        sl: halfRLevel,
                         sl_moved_be: true
                     }).eq('symbol', symbol);
                 }
