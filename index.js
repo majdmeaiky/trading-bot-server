@@ -46,27 +46,39 @@ function roundToStep(value, step) {
     return Number(rounded.toFixed(decimals));
 }
 
-async function reducePosition(symbol, side, qty) {
+async function forceClosePosition(symbol) {
     try {
-        const reduceSide = side === 'BUY' ? 'SELL' : 'BUY';
+        const params = `timestamp=${Date.now()}`;
+        const sig = signQuery(params, secret);
+        const url = `${BASE}/fapi/v2/positionRisk?${params}&signature=${sig}`;
+        const res = await axios.get(url, { headers: { 'X-MBX-APIKEY': key } });
+
+        const position = res.data.find(p =>
+            p.symbol === symbol && Math.abs(Number(p.positionAmt)) > 0
+        );
+
+        if (!position) {
+            console.log(`ℹ️ No active position to close for ${symbol}`);
+            return;
+        }
+
+        const rawQty = Math.abs(Number(position.positionAmt));
+        const side = Number(position.positionAmt) > 0 ? 'SELL' : 'BUY';
 
         const precision = precisionMap[symbol];
-        const qtyRounded = roundToStep(qty, precision.qtyStep);
+        const qtyRounded = roundToStep(rawQty, precision.qtyStep);
 
-        const params = `symbol=${symbol}&side=${reduceSide}&type=MARKET&quantity=${qtyRounded}&reduceOnly=true&timestamp=${Date.now()}`;
-        const signature = signQuery(params, secret);
-        const url = `${BASE}/fapi/v1/order?${params}&signature=${signature}`;
+        const closeParams = `symbol=${symbol}&side=${side}&type=MARKET&quantity=${qtyRounded}&timestamp=${Date.now()}`;
+        const closeSig = signQuery(closeParams, secret);
+        const closeURL = `${BASE}/fapi/v1/order?${closeParams}&signature=${closeSig}`;
+        await axios.post(closeURL, null, { headers: { 'X-MBX-APIKEY': key } });
 
-        const res = await axios.post(url, null, {
-            headers: { 'X-MBX-APIKEY': key },
-        });
-
-        console.log(`💰 Reduced position by ${qtyRounded} on ${symbol}`);
-        return res.data;
+        console.log(`✅ Force-closed position for ${symbol} (${qtyRounded} at market, side: ${side})`);
     } catch (err) {
-        console.error(`❌ Failed to reduce position for ${symbol}:`, err.response?.data || err.message);
+        console.error(`❌ Force-close failed for ${symbol}:`, err.response?.data || err.message);
     }
 }
+
 
 async function updateStopLoss(symbol, side, newSL) {
     try {
