@@ -410,8 +410,37 @@ app.post('/webhook', async (req, res) => {
         try {
             const existingTrade = activeTrades[symbol];
             if (existingTrade) {
-                console.warn(`⚠️ Trade for ${symbol} already in same direction (${side}). Skipping.`);
-                return;
+                const sameSide = existingTrade.side === side;
+                const oppositeSide = existingTrade.side === 'BUY' ? 'SELL' : 'BUY';
+            
+                // Case 1: Skip if same side
+                if (sameSide) {
+                    console.warn(`⚠️ Trade for ${symbol} already in same direction (${side}). Skipping.`);
+                    return;
+                }
+            
+                // Case 2: If losing > 20% of SL, close and flip
+                const slLossThreshold = existingTrade.side === 'BUY'
+                    ? existingTrade.entryPrice - ((existingTrade.entryPrice - existingTrade.sl) * 0.2)
+                    : existingTrade.entryPrice + ((existingTrade.sl - existingTrade.entryPrice) * 0.2);
+            
+                const hit20PercentLoss = existingTrade.side === 'BUY'
+                    ? entryPrice <= slLossThreshold
+                    : entryPrice >= slLossThreshold;
+            
+                if (hit20PercentLoss || existingTrade.sl_moved_half) {
+                    console.log(`🔁 Reversing trade for ${symbol}. Reason: ${hit20PercentLoss ? '20% SL Loss' : 'SL moved to half + opposite signal'}`);
+            
+                    await cancelAllOpenOrders(symbol);
+                    await forceClosePosition(symbol);
+                    await supabase.from('orders').delete().eq('symbol', symbol);
+                    delete activeTrades[symbol];
+            
+                    // Allow the new trade to proceed
+                } else {
+                    console.warn(`⚠️ Opposite signal received but no trigger met. Skipping.`);
+                    return;
+                }
             }
 
 
