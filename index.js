@@ -48,26 +48,36 @@ function roundToStep(value, step) {
 
 async function forceClosePosition(symbol) {
     try {
-        const posRes = await axios.get(
-            `${BASE}/fapi/v2/positionRisk?timestamp=${Date.now()}&signature=${signQuery(`timestamp=${Date.now()}`, secret)}`,
-            { headers: { 'X-MBX-APIKEY': key } }
+        const timestamp = Date.now();
+        const query = `timestamp=${timestamp}`;
+        const sig = signQuery(query, secret);
+        const url = `${BASE}/fapi/v2/positionRisk?${query}&signature=${sig}`;
+        const res = await axios.get(url, { headers: { 'X-MBX-APIKEY': key } });
+
+        const position = res.data.find(p =>
+            p.symbol === symbol && Math.abs(Number(p.positionAmt)) > 0
         );
-        const position = posRes.data.find(p => p.symbol === symbol && Math.abs(Number(p.positionAmt)) > 0);
+
         if (!position) {
             console.log(`ℹ️ No active position to close for ${symbol}`);
             return;
         }
+
+        const rawQty = Math.abs(Number(position.positionAmt));
         const side = Number(position.positionAmt) > 0 ? 'SELL' : 'BUY';
-        const closeParams = `symbol=${symbol}&side=${side}&type=MARKET&reduceOnly=true&timestamp=${Date.now()}`;
+        const precision = precisionMap[symbol];
+        const qtyRounded = roundToStep(rawQty, precision.qtyStep);
+
+        const closeParams = `symbol=${symbol}&side=${side}&type=MARKET&quantity=${qtyRounded}&reduceOnly=true&timestamp=${Date.now()}`;
         const closeSig = signQuery(closeParams, secret);
-        await axios.post(
-            `${BASE}/fapi/v1/order?${closeParams}&signature=${closeSig}`,
-            null,
-            { headers: { 'X-MBX-APIKEY': key } }
-        );
-        console.log(`✅ Position fully closed for ${symbol} (reduceOnly MARKET, side: ${side})`);
+        const closeURL = `${BASE}/fapi/v1/order?${closeParams}&signature=${closeSig}`;
+
+        await axios.post(closeURL, null, { headers: { 'X-MBX-APIKEY': key } });
+
+        console.log(`✅ Fully closed position for ${symbol} (qty: ${qtyRounded}, side: ${side})`);
     } catch (err) {
         console.error(`❌ forceClosePosition failed for ${symbol}:`, err.response?.data || err.message);
+        throw err; // Propagate error so you can decide not to open new trade if it fails
     }
 }
 
