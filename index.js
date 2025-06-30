@@ -489,6 +489,12 @@ app.listen(3000, async () => {
     for (const trade of trades) {
         activeTrades[trade.symbol] = trade;
     }
-
+    const symbols = Object.keys(activeTrades);
+    if (symbols.length === 0) {
+        console.log("🛑 No active trades to monitor. WebSocket not started.");
+        return;
+    }
+    console.log(`📡 WebSocket connected for: ${symbols.join(', ')}`);
+    
     //rebuildWebSocket(); // 🚀 Start WebSocket with loaded symbols
 });
