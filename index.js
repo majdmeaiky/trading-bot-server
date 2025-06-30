@@ -48,36 +48,29 @@ function roundToStep(value, step) {
 
 async function forceClosePosition(symbol) {
     try {
-        const params = `timestamp=${Date.now()}`;
-        const sig = signQuery(params, secret);
-        const url = `${BASE}/fapi/v2/positionRisk?${params}&signature=${sig}`;
-        const res = await axios.get(url, { headers: { 'X-MBX-APIKEY': key } });
-
-        const position = res.data.find(p =>
-            p.symbol === symbol && Math.abs(Number(p.positionAmt)) > 0
+        const posRes = await axios.get(
+            `${BASE}/fapi/v2/positionRisk?timestamp=${Date.now()}&signature=${signQuery(`timestamp=${Date.now()}`, secret)}`,
+            { headers: { 'X-MBX-APIKEY': key } }
         );
-
+        const position = posRes.data.find(p => p.symbol === symbol && Math.abs(Number(p.positionAmt)) > 0);
         if (!position) {
             console.log(`ℹ️ No active position to close for ${symbol}`);
             return;
         }
-
-        const rawQty = Math.abs(Number(position.positionAmt));
         const side = Number(position.positionAmt) > 0 ? 'SELL' : 'BUY';
-
-        const precision = precisionMap[symbol];
-        const qtyRounded = roundToStep(rawQty, precision.qtyStep);
-
-        const closeParams = `symbol=${symbol}&side=${side}&type=MARKET&quantity=${qtyRounded}&timestamp=${Date.now()}`;
+        const closeParams = `symbol=${symbol}&side=${side}&type=MARKET&reduceOnly=true&timestamp=${Date.now()}`;
         const closeSig = signQuery(closeParams, secret);
-        const closeURL = `${BASE}/fapi/v1/order?${closeParams}&signature=${closeSig}`;
-        await axios.post(closeURL, null, { headers: { 'X-MBX-APIKEY': key } });
-
-        console.log(`✅ Force-closed position for ${symbol} (${qtyRounded} at market, side: ${side})`);
+        await axios.post(
+            `${BASE}/fapi/v1/order?${closeParams}&signature=${closeSig}`,
+            null,
+            { headers: { 'X-MBX-APIKEY': key } }
+        );
+        console.log(`✅ Position fully closed for ${symbol} (reduceOnly MARKET, side: ${side})`);
     } catch (err) {
-        console.error(`❌ Force-close failed for ${symbol}:`, err.response?.data || err.message);
+        console.error(`❌ forceClosePosition failed for ${symbol}:`, err.response?.data || err.message);
     }
 }
+
 
 
 async function updateStopLoss(symbol, side, newSL) {
@@ -147,35 +140,6 @@ async function cancelAllOpenOrders(symbol) {
 }
 
 
-async function forceClosePosition(symbol) {
-    try {
-        const params = `timestamp=${Date.now()}`;
-        const sig = signQuery(params, secret);
-        const url = `${BASE}/fapi/v2/positionRisk?${params}&signature=${sig}`;
-        const res = await axios.get(url, { headers: { 'X-MBX-APIKEY': key } });
-
-        const position = res.data.find(p =>
-            p.symbol === symbol && Math.abs(Number(p.positionAmt)) > 0
-        );
-
-        if (!position) {
-            console.log(`ℹ️ No active position to close for ${symbol}`);
-            return;
-        }
-
-        const side = Number(position.positionAmt) > 0 ? 'SELL' : 'BUY';
-        const closeParams = `symbol=${symbol}&side=${side}&type=MARKET&closePosition=true&timestamp=${Date.now()}`;
-        const closeSig = signQuery(closeParams, secret);
-        const closeURL = `${BASE}/fapi/v1/order?${closeParams}&signature=${closeSig}`;
-        await axios.post(closeURL, null, { headers: { 'X-MBX-APIKEY': key } });
-
-        console.log(`✅ Force-closed position for ${symbol} with ${side}`);
-    } catch (err) {
-        console.error(`❌ Force-close failed for ${symbol}:`, err.response?.data || err.message);
-    }
-}
-
-
 
 function signQuery(queryString, secret) {
     return crypto.createHmac('sha256', secret).update(queryString).digest('hex');
@@ -212,191 +176,192 @@ async function saveTrade(symbol, side, qty, leverage, entryPrice, tp, sl, tp1, t
 }
 
 
-function rebuildWebSocket() {
-    if (ws) {
-        ws.close();
-        console.log("♻️ Rebuilding WebSocket with new symbol list...");
-    }
+// function rebuildWebSocket() {
+//     if (ws) {
+//         ws.close();
+//         console.log("♻️ Rebuilding WebSocket with new symbol list...");
+//     }
 
-    const symbols = Object.keys(activeTrades);
-    if (symbols.length === 0) {
-        console.log("🛑 No active trades to monitor. WebSocket not started.");
-        return;
-    }
+//     const symbols = Object.keys(activeTrades);
+//     if (symbols.length === 0) {
+//         console.log("🛑 No active trades to monitor. WebSocket not started.");
+//         return;
+//     }
 
-    const streams = symbols.map(s => `${s.toLowerCase()}@aggTrade`).join('/');
-    const wsUrl = `wss://fstream.binance.com/stream?streams=${streams}`;
+//     const streams = symbols.map(s => `${s.toLowerCase()}@aggTrade`).join('/');
+//     const wsUrl = `wss://fstream.binance.com/stream?streams=${streams}`;
 
-    ws = new WebSocket(wsUrl);
+//     ws = new WebSocket(wsUrl);
 
-    ws.on('open', () => console.log(`📡 WebSocket connected for: ${symbols.join(', ')}`));
+//     ws.on('open', () => console.log(`📡 WebSocket connected for: ${symbols.join(', ')}`));
 
-    ws.on('message', async (msg) => {
+//     ws.on('message', async (msg) => {
 
-        try {
+//         try {
 
-            const parsed = JSON.parse(msg);
-            const symbol = parsed.data.s;
-            const price = parseFloat(parsed.data.p);
-            const trade = activeTrades[symbol];
-            if (!trade) return;
+//             const parsed = JSON.parse(msg);
+//             const symbol = parsed.data.s;
+//             const price = parseFloat(parsed.data.p);
+//             const trade = activeTrades[symbol];
+//             if (!trade) return;
 
-            const isLong = trade.side === 'BUY';
-            const halfRLevel = isLong
-            ? trade.entryPrice + (trade.tp1 - trade.entryPrice) * 0.5
-            : trade.entryPrice - (trade.entryPrice - trade.tp1) * 0.5;
-    
-            // === 0.5R SL MOVE (calc from tp1) ===
+//             const isLong = trade.side === 'BUY';
+//             const halfRLevel = isLong
+//                 ? trade.entryPrice + (trade.tp1 - trade.entryPrice) * 0.5
+//                 : trade.entryPrice - (trade.entryPrice - trade.tp1) * 0.5;
 
-
-
-            if (!trade.sl_moved_half && ((isLong && price >= halfRLevel) || (!isLong && price <= halfRLevel))) {
-
-                trade.sl_moved_half = true;
-                await supabase.from('orders').update({ sl_moved_half: true }).eq('symbol', symbol);
-
-                const halfRiskSL = isLong
-                    ? trade.entryPrice - ((trade.entryPrice - trade.sl) * 0.5)
-                    : trade.entryPrice + ((trade.sl - trade.entryPrice) * 0.5);
-
-                try {
-                    await updateStopLoss(symbol, trade.side, halfRiskSL);
-                    trade.sl = halfRiskSL;
-
-                    await supabase.from('orders').update({
-                        sl: halfRiskSL
-                    }).eq('symbol', symbol);
-                }
-                catch (err) {
-                    console.error("0.5R SL move failed");
-                }
+//             // === 0.5R SL MOVE (calc from tp1) ===
 
 
-                console.log(`🔒 SL moved to partial-risk (-0.2R) at ${halfRiskSL} for ${symbol}`);
-            }
+
+//             if (!trade.sl_moved_half && ((isLong && price >= halfRLevel) || (!isLong && price <= halfRLevel))) {
+
+//                 trade.sl_moved_half = true;
+//                 await supabase.from('orders').update({ sl_moved_half: true }).eq('symbol', symbol);
+
+//                 const halfRiskSL = isLong
+//                     ? trade.entryPrice - ((trade.entryPrice - trade.sl) * 0.5)
+//                     : trade.entryPrice + ((trade.sl - trade.entryPrice) * 0.5);
+
+//                 try {
+//                     await updateStopLoss(symbol, trade.side, halfRiskSL);
+//                     trade.sl = halfRiskSL;
+
+//                     await supabase.from('orders').update({
+//                         sl: halfRiskSL
+//                     }).eq('symbol', symbol);
+//                 }
+//                 catch (err) {
+//                     console.error("0.5R SL move failed");
+//                 }
 
 
-            // === TP1 HIT ===
-            if (!trade.tp1_hit && ((isLong && price >= trade.tp1) || (!isLong && price <= trade.tp1))) {
-                trade.tp1_hit = true;
-                await supabase.from('orders').update({ tp1_hit: true }).eq('symbol', symbol);
-
-                console.log(`🎯 TP1 HIT for ${symbol} at ${price}`);
-
-                // Reduce 30%
-                const reduceQty = trade.qty * 0.3;
-                await reducePosition(symbol, trade.side, reduceQty);
-
-                try {// Update SL on Binance
-                    await updateStopLoss(symbol, trade.side, halfRLevel);
-                    console.log(`🔐 SL moved to BE: ${halfRLevel}`);
-
-                    trade.sl = halfRLevel;
-                    trade.sl_moved_be = true;
-                    trade.qty = trade.qty * 0.7;
+//                 console.log(`🔒 SL moved to partial-risk (-0.2R) at ${halfRiskSL} for ${symbol}`);
+//             }
 
 
-                    await supabase.from('orders').update({
-                        qty: trade.qty,
-                        sl: halfRLevel,
-                        sl_moved_be: true
-                    }).eq('symbol', symbol);
-                }
-                catch (err) {
-                    console.error("TP1 SL move to BE failed");
-                }
+//             // === TP1 HIT ===
+//             if (!trade.tp1_hit && ((isLong && price >= trade.tp1) || (!isLong && price <= trade.tp1))) {
+//                 trade.tp1_hit = true;
+//                 await supabase.from('orders').update({ tp1_hit: true }).eq('symbol', symbol);
 
-            }
+//                 console.log(`🎯 TP1 HIT for ${symbol} at ${price}`);
 
-            // === TP2 HIT ===
-            if (!trade.tp2_hit && ((isLong && price >= trade.tp2) || (!isLong && price <= trade.tp2))) {
-                trade.tp2_hit = true;
-                await supabase.from('orders').update({ tp2_hit: true }).eq('symbol', symbol);
+//                 // Reduce 30%
+//                 const reduceQty = trade.qty * 0.3;
+//                 await reducePosition(symbol, trade.side, reduceQty);
 
-                console.log(`🎯 TP2 HIT for ${symbol} at ${price}`);
+//                 try {// Update SL on Binance
+//                     await updateStopLoss(symbol, trade.side, halfRLevel);
+//                     console.log(`🔐 SL moved to BE: ${halfRLevel}`);
 
-                // Reduce 40%
-                const reduceQty = trade.qty * 0.3;
-                await reducePosition(symbol, trade.side, reduceQty);
-
-                try {// Update SL on Binance
-                    await updateStopLoss(symbol, trade.side, trade.tp1);
-                    console.log(`🔐 SL moved to TP1 LEVEL: ${trade.tp1}`);
+//                     trade.sl = halfRLevel;
+//                     trade.sl_moved_be = true;
+//                     trade.qty = trade.qty * 0.7;
 
 
-                    trade.sl = trade.tp1;
-                    trade.sl_moved_1R = true;
-                    trade.qty = trade.qty * 0.7;
+//                     await supabase.from('orders').update({
+//                         qty: trade.qty,
+//                         sl: halfRLevel,
+//                         sl_moved_be: true
+//                     }).eq('symbol', symbol);
+//                 }
+//                 catch (err) {
+//                     console.error("TP1 SL move to BE failed");
+//                 }
 
-                    await supabase.from('orders').update({
-                        qty: trade.qty,
-                        sl: trade.tp1,
-                        sl_moved_1R: true
-                    }).eq('symbol', symbol);
+//             }
 
-                    console.log(`🛡️ SL moved to breakeven`);
-                }
-                catch (err) {
-                    console.error("TP2 SL move to TP1 failed");
-                }
-            }
+//             // === TP2 HIT ===
+//             if (!trade.tp2_hit && ((isLong && price >= trade.tp2) || (!isLong && price <= trade.tp2))) {
+//                 trade.tp2_hit = true;
+//                 await supabase.from('orders').update({ tp2_hit: true }).eq('symbol', symbol);
 
-            // === TP HIT ===
-            if (!trade.tp_hit && ((isLong && price >= trade.tp) || (!isLong && price <= trade.tp))) {
-                trade.tp_hit = true;
-                console.log(`✅ TP HIT for ${symbol} at ${price}`);
-                await cancelAllOpenOrders(symbol);
-                await forceClosePosition(symbol);
-                await supabase.from('orders').delete().eq('symbol', symbol);
-                delete activeTrades[symbol];
-                if (!reconnectTimeout) {
-                    console.log("♻️ Rebuilding WebSocket after TP...");
-                    reconnectTimeout = setTimeout(() => {
-                        reconnectTimeout = null;
-                        rebuildWebSocket();
-                    }, 500); // cooldown
-                }
-            }
+//                 console.log(`🎯 TP2 HIT for ${symbol} at ${price}`);
 
-            // === SL HIT ===
-            if (!trade.sl_hit && ((isLong && price <= trade.sl) || (!isLong && price >= trade.sl))) {
-                trade.sl_hit = true;
-                console.log(`🛑 SL HIT for ${symbol} at ${price}`);
-                await cancelAllOpenOrders(symbol);
-                await forceClosePosition(symbol);
-                await supabase.from('orders').delete().eq('symbol', symbol);
-                delete activeTrades[symbol];
-                if (!reconnectTimeout) {
-                    console.log("♻️ Rebuilding WebSocket after SL...");
-                    reconnectTimeout = setTimeout(() => {
-                        reconnectTimeout = null;
-                        rebuildWebSocket();
-                    }, 500); // cooldown
-                }
-            }
+//                 // Reduce 40%
+//                 const reduceQty = trade.qty * 0.3;
+//                 await reducePosition(symbol, trade.side, reduceQty);
 
-        } catch (err) {
-            console.error("❌ WebSocket message error:", err.message);
-        }
-    });
+//                 try {// Update SL on Binance
+//                     await updateStopLoss(symbol, trade.side, trade.tp1);
+//                     console.log(`🔐 SL moved to TP1 LEVEL: ${trade.tp1}`);
 
-    ws.on('close', () => {
-        console.log("🔌 WebSocket closed.");
-    });
 
-    ws.on('error', (err) => {
-        console.error("❌ WebSocket error:", err.message);
-        if (!reconnectTimeout) {
-            reconnectTimeout = setTimeout(() => {
-                reconnectTimeout = null;
-                rebuildWebSocket();
-            }, 5000); // cooldown
-        }
-    });
-}
+//                     trade.sl = trade.tp1;
+//                     trade.sl_moved_1R = true;
+//                     trade.qty = trade.qty * 0.7;
+
+//                     await supabase.from('orders').update({
+//                         qty: trade.qty,
+//                         sl: trade.tp1,
+//                         sl_moved_1R: true
+//                     }).eq('symbol', symbol);
+
+//                     console.log(`🛡️ SL moved to breakeven`);
+//                 }
+//                 catch (err) {
+//                     console.error("TP2 SL move to TP1 failed");
+//                 }
+//             }
+
+//             // === TP HIT ===
+//             if (!trade.tp_hit && ((isLong && price >= trade.tp) || (!isLong && price <= trade.tp))) {
+//                 trade.tp_hit = true;
+//                 console.log(`✅ TP HIT for ${symbol} at ${price}`);
+//                 await cancelAllOpenOrders(symbol);
+//                 await forceClosePosition(symbol);
+//                 await supabase.from('orders').delete().eq('symbol', symbol);
+//                 delete activeTrades[symbol];
+//                 if (!reconnectTimeout) {
+//                     console.log("♻️ Rebuilding WebSocket after TP...");
+//                     reconnectTimeout = setTimeout(() => {
+//                         reconnectTimeout = null;
+//                         rebuildWebSocket();
+//                     }, 500); // cooldown
+//                 }
+//             }
+
+//             // === SL HIT ===
+//             if (!trade.sl_hit && ((isLong && price <= trade.sl) || (!isLong && price >= trade.sl))) {
+//                 trade.sl_hit = true;
+//                 console.log(`🛑 SL HIT for ${symbol} at ${price}`);
+//                 await cancelAllOpenOrders(symbol);
+//                 await forceClosePosition(symbol);
+//                 await supabase.from('orders').delete().eq('symbol', symbol);
+//                 delete activeTrades[symbol];
+//                 if (!reconnectTimeout) {
+//                     console.log("♻️ Rebuilding WebSocket after SL...");
+//                     reconnectTimeout = setTimeout(() => {
+//                         reconnectTimeout = null;
+//                         rebuildWebSocket();
+//                     }, 500); // cooldown
+//                 }
+//             }
+
+//         } catch (err) {
+//             console.error("❌ WebSocket message error:", err.message);
+//         }
+//     });
+
+//     ws.on('close', () => {
+//         console.log("🔌 WebSocket closed.");
+//     });
+
+//     ws.on('error', (err) => {
+//         console.error("❌ WebSocket error:", err.message);
+//         if (!reconnectTimeout) {
+//             reconnectTimeout = setTimeout(() => {
+//                 reconnectTimeout = null;
+//                 rebuildWebSocket();
+//             }, 5000); // cooldown
+//         }
+//     });
+// }
 
 
 // === Webhook Endpoint ===
+
 app.post('/webhook', async (req, res) => {
 
     let body = req.body;
@@ -420,41 +385,18 @@ app.post('/webhook', async (req, res) => {
         }
 
         try {
-            const existingTrade = activeTrades[symbol];
-            if (existingTrade) {
-                const sameSide = existingTrade.side === side;
-                const oppositeSide = existingTrade.side === 'BUY' ? 'SELL' : 'BUY';
-            
-                // Case 1: Skip if same side
-                if (sameSide) {
-                    console.warn(`⚠️ Trade for ${symbol} already in same direction (${side}). Skipping.`);
-                    return;
-                }
-            
-                // Case 2: If losing > 20% of SL, close and flip
-                const slLossThreshold = existingTrade.side === 'BUY'
-                    ? existingTrade.entryPrice - ((existingTrade.entryPrice - existingTrade.sl) * 0.2)
-                    : existingTrade.entryPrice + ((existingTrade.sl - existingTrade.entryPrice) * 0.2);
-            
-                const hit20PercentLoss = existingTrade.side === 'BUY'
-                    ? entryPrice <= slLossThreshold
-                    : entryPrice >= slLossThreshold;
-            
-                if (hit20PercentLoss || existingTrade.sl_moved_half) {
-                    console.log(`🔁 Reversing trade for ${symbol}. Reason: ${hit20PercentLoss ? '20% SL Loss' : 'SL moved to half + opposite signal'}`);
-            
-                    await cancelAllOpenOrders(symbol);
-                    await forceClosePosition(symbol);
-                    await supabase.from('orders').delete().eq('symbol', symbol);
-                    delete activeTrades[symbol];
-            
-                    // Allow the new trade to proceed
-                } else {
-                    console.warn(`⚠️ Opposite signal received but no trigger met. Skipping.`);
-                    return;
-                }
+            const existing = activeTrades[symbol];
+            if (existing && existing.side !== side) {
+              console.log(`🔁 Opposite signal for ${symbol}, closing old position.`);
+              await cancelAllOpenOrders(symbol);
+              await forceClosePosition(symbol);
+              await supabase.from('orders').delete().eq('symbol', symbol);
+              delete activeTrades[symbol];
+            } else if (existing) {
+              console.log(`⏹️ Same-side signal for ${symbol}, skip open.`);
+              return;
             }
-
+        
 
 
             // const activeOrderParams = `symbol=${symbol}&timestamp=${Date.now()}`;
@@ -521,7 +463,7 @@ app.post('/webhook', async (req, res) => {
                 tp_hit: false
             };
 
-            rebuildWebSocket(); // 🔁 Update the WebSocket with the new trade
+            //rebuildWebSocket(); // 🔁 Update the WebSocket with the new trade
 
         } catch (err) {
             console.error(err.response?.data || err.message);
@@ -548,5 +490,5 @@ app.listen(3000, async () => {
         activeTrades[trade.symbol] = trade;
     }
 
-    rebuildWebSocket(); // 🚀 Start WebSocket with loaded symbols
+    //rebuildWebSocket(); // 🚀 Start WebSocket with loaded symbols
 });
