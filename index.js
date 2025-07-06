@@ -186,36 +186,36 @@ async function saveTrade(symbol, side, qty, leverage, entryPrice, tp, sl, tp1, t
 }
 
 
-// function rebuildWebSocket() {
-//     if (ws) {
-//         ws.close();
-//         console.log("♻️ Rebuilding WebSocket with new symbol list...");
-//     }
+function rebuildWebSocket() {
+    if (ws) {
+        ws.close();
+        console.log("♻️ Rebuilding WebSocket with new symbol list...");
+    }
 
-//     const symbols = Object.keys(activeTrades);
-//     if (symbols.length === 0) {
-//         console.log("🛑 No active trades to monitor. WebSocket not started.");
-//         return;
-//     }
+    const symbols = Object.keys(activeTrades);
+    if (symbols.length === 0) {
+        console.log("🛑 No active trades to monitor. WebSocket not started.");
+        return;
+    }
 
-//     const streams = symbols.map(s => `${s.toLowerCase()}@aggTrade`).join('/');
-//     const wsUrl = `wss://fstream.binance.com/stream?streams=${streams}`;
+    const streams = symbols.map(s => `${s.toLowerCase()}@aggTrade`).join('/');
+    const wsUrl = `wss://fstream.binance.com/stream?streams=${streams}`;
 
-//     ws = new WebSocket(wsUrl);
+    ws = new WebSocket(wsUrl);
 
-//     ws.on('open', () => console.log(`📡 WebSocket connected for: ${symbols.join(', ')}`));
+    ws.on('open', () => console.log(`📡 WebSocket connected for: ${symbols.join(', ')}`));
 
-//     ws.on('message', async (msg) => {
+    ws.on('message', async (msg) => {
 
-//         try {
+        try {
 
-//             const parsed = JSON.parse(msg);
-//             const symbol = parsed.data.s;
-//             const price = parseFloat(parsed.data.p);
-//             const trade = activeTrades[symbol];
-//             if (!trade) return;
+            const parsed = JSON.parse(msg);
+            const symbol = parsed.data.s;
+            const price = parseFloat(parsed.data.p);
+            const trade = activeTrades[symbol];
+            if (!trade) return;
 
-//             const isLong = trade.side === 'BUY';
+            const isLong = trade.side === 'BUY';
 //             const halfRLevel = isLong
 //                 ? trade.entryPrice + (trade.tp1 - trade.entryPrice) * 0.5
 //                 : trade.entryPrice - (trade.entryPrice - trade.tp1) * 0.5;
@@ -315,59 +315,59 @@ async function saveTrade(symbol, side, qty, leverage, entryPrice, tp, sl, tp1, t
 //                 }
 //             }
 
-//             // === TP HIT ===
-//             if (!trade.tp_hit && ((isLong && price >= trade.tp) || (!isLong && price <= trade.tp))) {
-//                 trade.tp_hit = true;
-//                 console.log(`✅ TP HIT for ${symbol} at ${price}`);
-//                 await cancelAllOpenOrders(symbol);
-//                 await forceClosePosition(symbol);
-//                 await supabase.from('orders').delete().eq('symbol', symbol);
-//                 delete activeTrades[symbol];
-//                 if (!reconnectTimeout) {
-//                     console.log("♻️ Rebuilding WebSocket after TP...");
-//                     reconnectTimeout = setTimeout(() => {
-//                         reconnectTimeout = null;
-//                         rebuildWebSocket();
-//                     }, 500); // cooldown
-//                 }
-//             }
+            // === TP HIT ===
+            if (!trade.tp_hit && ((isLong && price >= trade.tp) || (!isLong && price <= trade.tp))) {
+                trade.tp_hit = true;
+                console.log(`✅ TP HIT for ${symbol} at ${price}`);
+                await cancelAllOpenOrders(symbol);
+                await forceClosePosition(symbol);
+                await supabase.from('orders').delete().eq('symbol', symbol);
+                delete activeTrades[symbol];
+                if (!reconnectTimeout) {
+                    console.log("♻️ Rebuilding WebSocket after TP...");
+                    reconnectTimeout = setTimeout(() => {
+                        reconnectTimeout = null;
+                        rebuildWebSocket();
+                    }, 500); // cooldown
+                }
+            }
 
-//             // === SL HIT ===
-//             if (!trade.sl_hit && ((isLong && price <= trade.sl) || (!isLong && price >= trade.sl))) {
-//                 trade.sl_hit = true;
-//                 console.log(`🛑 SL HIT for ${symbol} at ${price}`);
-//                 await cancelAllOpenOrders(symbol);
-//                 await forceClosePosition(symbol);
-//                 await supabase.from('orders').delete().eq('symbol', symbol);
-//                 delete activeTrades[symbol];
-//                 if (!reconnectTimeout) {
-//                     console.log("♻️ Rebuilding WebSocket after SL...");
-//                     reconnectTimeout = setTimeout(() => {
-//                         reconnectTimeout = null;
-//                         rebuildWebSocket();
-//                     }, 500); // cooldown
-//                 }
-//             }
+            // === SL HIT ===
+            if (!trade.sl_hit && ((isLong && price <= trade.sl) || (!isLong && price >= trade.sl))) {
+                trade.sl_hit = true;
+                console.log(`🛑 SL HIT for ${symbol} at ${price}`);
+                await cancelAllOpenOrders(symbol);
+                await forceClosePosition(symbol);
+                await supabase.from('orders').delete().eq('symbol', symbol);
+                delete activeTrades[symbol];
+                if (!reconnectTimeout) {
+                    console.log("♻️ Rebuilding WebSocket after SL...");
+                    reconnectTimeout = setTimeout(() => {
+                        reconnectTimeout = null;
+                        rebuildWebSocket();
+                    }, 500); // cooldown
+                }
+            }
 
-//         } catch (err) {
-//             console.error("❌ WebSocket message error:", err.message);
-//         }
-//     });
+        } catch (err) {
+            console.error("❌ WebSocket message error:", err.message);
+        }
+    });
 
-//     ws.on('close', () => {
-//         console.log("🔌 WebSocket closed.");
-//     });
+    ws.on('close', () => {
+        console.log("🔌 WebSocket closed.");
+    });
 
-//     ws.on('error', (err) => {
-//         console.error("❌ WebSocket error:", err.message);
-//         if (!reconnectTimeout) {
-//             reconnectTimeout = setTimeout(() => {
-//                 reconnectTimeout = null;
-//                 rebuildWebSocket();
-//             }, 5000); // cooldown
-//         }
-//     });
-// }
+    ws.on('error', (err) => {
+        console.error("❌ WebSocket error:", err.message);
+        if (!reconnectTimeout) {
+            reconnectTimeout = setTimeout(() => {
+                reconnectTimeout = null;
+                rebuildWebSocket();
+            }, 5000); // cooldown
+        }
+    });
+}
 
 
 // === Webhook Endpoint ===
@@ -506,5 +506,5 @@ app.listen(3000, async () => {
     }
     console.log(`📡 WebSocket connected for: ${symbols.join(', ')}`);
     
-    //rebuildWebSocket(); // 🚀 Start WebSocket with loaded symbols
+    rebuildWebSocket(); // 🚀 Start WebSocket with loaded symbols
 });
